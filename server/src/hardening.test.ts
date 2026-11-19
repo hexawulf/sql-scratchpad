@@ -9,6 +9,7 @@ import {
   buildApp,
   checkDenylist,
   loadConfig,
+  normalizeClientIp,
   parseIpAllowList,
   parseTrustProxy,
 } from './index.js';
@@ -273,5 +274,131 @@ describe('M8-lite hardening unit checks', () => {
     } finally {
       await ctx.app.close();
     }
+  });
+
+  it('F1: defaults IPV6_PREFIX_BITS to 64 and shares rate-limit buckets across same /64 and IPv4-mapped IPv6', async () => {
+    const cfg = loadConfig({ ...BASE_ENV, TRUST_PROXY: '10.0.0.1' });
+    expect(cfg.IPV6_PREFIX_BITS).toBe(64);
+    expect(loadConfig({ ...BASE_ENV, IPV6_PREFIX_BITS: '48' }).IPV6_PREFIX_BITS).toBe(48);
+    expect(() => loadConfig({ ...BASE_ENV, IPV6_PREFIX_BITS: '0' })).toThrow();
+    expect(() => loadConfig({ ...BASE_ENV, IPV6_PREFIX_BITS: '129' })).toThrow();
+
+    // Direct IP normalisation unit checks
+    expect(normalizeClientIp('203.0.113.20')).toBe('203.0.113.20');
+    expect(normalizeClientIp('::ffff:203.0.113.20')).toBe('203.0.113.20');
+    expect(normalizeClientIp('::FFFF:203.0.113.20')).toBe('203.0.113.20');
+    expect(normalizeClientIp('0:0:0:0:0:ffff:cb00:7114')).toBe('203.0.113.20');
+    expect(normalizeClientIp('2001:db8:abcd:1234::1', 64)).toBe(
+      normalizeClientIp('2001:0db8:abcd:1234:ffff:ffff:ffff:ffff', 64),
+    );
+    expect(normalizeClientIp('2001:db8:abcd:1234::1', 64)).not.toBe(
+      normalizeClientIp('2001:db8:abcd:5678::1', 64),
+    );
+    expect(normalizeClientIp('2001:db8:abcd:1234::1', 48)).toBe(
+      normalizeClientIp('2001:db8:abcd:5678::1', 48),
+    );
+
+    // Separate process-lifetime key salt vs daily-rotated log salt (F3)
+    const d1 = new Date('2026-11-19T23:59:00Z');
+    const d2 = new Date('2026-11-20T00:01:00Z');
+    const hasher = new IpHasher(d1, 64);
+    const k1 = hasher.key('2001:db8:abcd:1234::1');
+    const k2 = hasher.key('2001:db8:abcd:1234::ffff');
+    const log1 = hasher.hash('2001:db8:abcd:1234::1', d1);
+    const log2 = hasher.hash('2001:db8:abcd:1234::1', d2);
+    expect(k1).toBe(k2);
+    expect(k1).not.toBe(log1);
+    expect(log2).not.toBe(log1);
+    expect(hasher.key('2001:db8:abcd:1234::1')).toBe(k1);
+    expect(hasher.key('::ffff:203.0.113.20')).toBe(hasher.key('203.0.113.20'));
+
+    const ctx = await buildApp({
+      config: cfg,
+      adminPool: makeMockPool(true),
+      enableRateLimit: true,
+      staticDir,
+    });
+
+    try {
+      // 10 creates/h limit: 6 from ::1 + 4 from ::ffff in the SAME /64 exhausts the 10/h bucket
+      for (let i = 0; i < 6; i += 1) {
+        const res = await ctx.app.inject({
+          method: 'POST',
+          url: '/api/workspaces',
+          remoteAddress: '10.0.0.1',
+          headers: { 'x-forwarded-for': '2001:db8:abcd:1234::1' },
+          payload: { dataset: 'nonexistent-dataset' },
+        });
+        expect(res.statusCode).toBe(400);
+      }
+      for (let i = 0; i < 4; i += 1) {
+        const res = await ctx.app.inject({
+          method: 'POST',
+          url: '/api/workspaces',
+          remoteAddress: '10.0.0.1',
+          headers: { 'x-forwarded-for': `2001:db8:abcd:1234::${(i + 2).toString(16)}` },
+          payload: { dataset: 'nonexistent-dataset' },
+        });
+        expect(res.statusCode).toBe(400);
+      }
+      // 11th request from another host in the SAME /64 must be rate-limited (429 + Retry-After)
+      const samePrefixBlocked = await ctx.app.inject({
+        method: 'POST',
+        url: '/api/workspaces',
+        remoteAddress: '10.0.0.1',
+        headers: { 'x-forwarded-for': '2001:db8:abcd:1234::ffff' },
+        payload: { dataset: 'nonexistent-dataset' },
+      });
+      expect(samePrefixBlocked.statusCode).toBe(429);
+      expect(Number(samePrefixBlocked.headers['retry-after'])).toBeGreaterThan(0);
+
+      // Different /64 must NOT be blocked
+      const diffPrefix = await ctx.app.inject({
+        method: 'POST',
+        url: '/api/workspaces',
+        remoteAddress: '10.0.0.1',
+        headers: { 'x-forwarded-for': '2001:db8:abcd:5678::1' },
+        payload: { dataset: 'nonexistent-dataset' },
+      });
+      expect(diffPrefix.statusCode).toBe(400);
+
+      // Plain IPv4 and IPv4-mapped IPv6 (::ffff:a.b.c.d) must share the exact same key
+      for (let i = 0; i < 6; i += 1) {
+        const res = await ctx.app.inject({
+          method: 'POST',
+          url: '/api/workspaces',
+          remoteAddress: '10.0.0.1',
+          headers: { 'x-forwarded-for': '203.0.113.20' },
+          payload: { dataset: 'nonexistent-dataset' },
+        });
+        expect(res.statusCode).toBe(400);
+      }
+      for (let i = 0; i < 4; i += 1) {
+        const res = await ctx.app.inject({
+          method: 'POST',
+          url: '/api/workspaces',
+          remoteAddress: '10.0.0.1',
+          headers: { 'x-forwarded-for': '::ffff:203.0.113.20' },
+          payload: { dataset: 'nonexistent-dataset' },
+        });
+        expect(res.statusCode).toBe(400);
+      }
+      const mappedBlocked = await ctx.app.inject({
+        method: 'POST',
+        url: '/api/workspaces',
+        remoteAddress: '10.0.0.1',
+        headers: { 'x-forwarded-for': '::ffff:203.0.113.20' },
+        payload: { dataset: 'nonexistent-dataset' },
+      });
+      expect(mappedBlocked.statusCode).toBe(429);
+      expect(Number(mappedBlocked.headers['retry-after'])).toBeGreaterThan(0);
+    } finally {
+      await ctx.app.close();
+    }
+  });
+
+  it('F7: defaults IMPORT_TIMEOUT_MS to 75 s and allows override via env', () => {
+    expect(loadConfig(BASE_ENV).IMPORT_TIMEOUT_MS).toBe(75 * 1000);
+    expect(loadConfig({ ...BASE_ENV, IMPORT_TIMEOUT_MS: '60000' }).IMPORT_TIMEOUT_MS).toBe(60_000);
   });
 });

@@ -11,11 +11,15 @@ describe('registerStaticSpa', () => {
   beforeAll(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'sql-scratchpad-static-'));
     mkdirSync(join(tempDir, 'assets'), { recursive: true });
+    mkdirSync(join(tempDir, '.git'), { recursive: true });
     writeFileSync(
       join(tempDir, 'index.html'),
       '<!doctype html><html><body>SQL Scratchpad</body></html>',
     );
     writeFileSync(join(tempDir, 'assets', 'app-abc123.js'), 'console.log("ok");');
+    writeFileSync(join(tempDir, '.env'), 'SECRET=shouldnotserve\n');
+    writeFileSync(join(tempDir, '.git', 'config'), '[core]\n\trepositoryformatversion = 0\n');
+    writeFileSync(join(tempDir, 'assets', '.hidden'), 'TOPSECRET\n');
   });
 
   afterAll(() => {
@@ -56,5 +60,39 @@ describe('registerStaticSpa', () => {
   it('returns false when distDir has no index.html', () => {
     const app = Fastify();
     expect(registerStaticSpa(app, join(tempDir, 'missing'))).toBe(false);
+  });
+
+  it('F5: refuses dotfiles and path traversal with 404 independent of nginx', async () => {
+    const app = Fastify();
+    expect(registerStaticSpa(app, tempDir)).toBe(true);
+
+    try {
+      const blockedPaths = [
+        '/.env',
+        '/%2eenv',
+        '/.git/config',
+        '/assets/.hidden',
+        '/assets/../.env',
+        '/..%2f..%2fetc/passwd',
+        '/assets/..%2f..%2fetc/passwd',
+        '/assets/..%5c.env',
+      ];
+
+      for (const url of blockedPaths) {
+        const res = await app.inject({ method: 'GET', url });
+        expect(res.statusCode, `expected 404 for ${url}`).toBe(404);
+        expect(res.body).not.toContain('shouldnotserve');
+        expect(res.body).not.toContain('TOPSECRET');
+        expect(res.body).not.toContain('repositoryformatversion');
+      }
+
+      // Normal files still serve 200
+      const okIndex = await app.inject({ method: 'GET', url: '/' });
+      expect(okIndex.statusCode).toBe(200);
+      const okAsset = await app.inject({ method: 'GET', url: '/assets/app-abc123.js' });
+      expect(okAsset.statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
   });
 });

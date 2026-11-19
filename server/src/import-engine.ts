@@ -408,7 +408,7 @@ export class ImportEngine {
       const beforeSet = new Set(beforeTables);
 
       // Batch InnoDB commits for large scripts without explicit ROLLBACK so 20k+ statements
-      // complete well within the 90 s wall-clock cap while preserving partial-apply semantics.
+      // complete well within the 75 s wall-clock cap while preserving partial-apply semantics.
       const hasExplicitRollback = statements.some((s) =>
         /\bROLLBACK\b/i.test(stripCommentsAndLiterals(s.sql)),
       );
@@ -422,6 +422,18 @@ export class ImportEngine {
 
       for (let i = 0; i < statements.length; i += 1) {
         const stmt = statements[i]!;
+
+        if (this.workspaceManager.isSessionAbortRequested(ws, 'A')) {
+          importError = {
+            index: i,
+            startLine: stmt.startLine,
+            code: 'QUERY_INTERRUPTED',
+            errno: 1317,
+            message: 'Import interrupted because the workspace was reset or deleted',
+            alreadyApplied: statementsOk > 0,
+          };
+          break;
+        }
 
         if (Date.now() >= deadlineMs) {
           importError = {
@@ -524,7 +536,8 @@ export class ImportEngine {
         }
       }
 
-      if (batchedAutocommit && !connectionBroken) {
+      const aborting = this.workspaceManager.isSessionAbortRequested(ws, 'A');
+      if (batchedAutocommit && !connectionBroken && !aborting) {
         try {
           await session.conn.query('COMMIT');
         } catch {
@@ -533,7 +546,7 @@ export class ImportEngine {
       }
 
       let tablesCreated: string[] = [];
-      if (!connectionBroken) {
+      if (!connectionBroken && !aborting) {
         try {
           const afterTables = await listWorkspaceTables(session.conn);
           tablesCreated = afterTables.filter((t) => !beforeSet.has(t));
@@ -570,7 +583,11 @@ export class ImportEngine {
         ...(note ? { note } : {}),
       };
     } finally {
-      if (restoreAutocommit && !connectionBroken) {
+      if (
+        restoreAutocommit &&
+        !connectionBroken &&
+        !this.workspaceManager.isSessionAbortRequested(ws, 'A')
+      ) {
         try {
           await session.conn.query(`SET autocommit = ${prevAutocommit}`);
         } catch {
@@ -580,7 +597,9 @@ export class ImportEngine {
       this.workspaceManager.releaseSession(ws, 'A', session);
       this.workspaceManager.touchWorkspace(ws);
       if (connectionBroken) {
-        delete ws.sessions.A;
+        if (ws.sessions.A === session) {
+          delete ws.sessions.A;
+        }
         await session.conn.end().catch(() => {
           session.conn.destroy();
         });

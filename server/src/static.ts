@@ -65,11 +65,21 @@ export function registerStaticSpa(app: FastifyInstance, distDir: string): boolea
       return reply.code(400).send(formatApiError('BAD_REQUEST', 'Malformed URL path'));
     }
 
+    // Refuse null bytes, backslashes, dotfiles/dot-directories, and traversal segments (404)
+    if (decodedPath.includes('\0') || decodedPath.includes('\\') || rawPath.includes('\\')) {
+      return reply.code(404).send(formatApiError('NOT_FOUND', 'Not found'));
+    }
+    const hasBlockedSegment = (p: string): boolean =>
+      p.split('/').some((seg) => seg === '.' || seg === '..' || seg.startsWith('.'));
+    if (hasBlockedSegment(rawPath) || hasBlockedSegment(decodedPath)) {
+      return reply.code(404).send(formatApiError('NOT_FOUND', 'Not found'));
+    }
+
     const relativePath = decodedPath.replace(/^\/+/, '');
     const candidate = relativePath.length > 0 ? resolve(normalizedRoot, relativePath) : indexHtmlPath;
 
     if (candidate !== indexHtmlPath && !candidate.startsWith(rootPrefix)) {
-      return reply.code(403).send(formatApiError('FORBIDDEN', 'Forbidden path'));
+      return reply.code(404).send(formatApiError('NOT_FOUND', 'Not found'));
     }
 
     applySecurityHeaders(reply);

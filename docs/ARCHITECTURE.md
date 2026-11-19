@@ -57,7 +57,7 @@ Template databases (`tpl_*`) are seeded once during container initialization. Cl
 - **Statement splitting:** `dbgate-query-splitter` splits scripts with MySQL `DELIMITER` support and preserves 1-based start lines for editor error highlighting.
 - **Warnings:** statements reporting `warningStatus > 0` run `SHOW WARNINGS` so silent type conversions and notes are surfaced in the status log and Messages pane.
 - **Import (`POST /api/workspaces/:wsId/import`):**
-  - Separate 6 MB body limit (while `/exec` stays at 256 KB), 60,000 statement cap, and 90 s wall-clock cap.
+  - Separate 6 MB body limit (while `/exec` stays at 256 KB), 60,000 statement cap, and 75 s wall-clock cap (`IMPORT_TIMEOUT_MS`).
   - Runs strictly on the workspace's own user connection — never the admin pool.
   - Refuses `mode: "append"` with `409 TRANSACTION_OPEN` if `@@in_transaction = 1`, and restores `@@autocommit` to its prior value in `finally`.
   - Selectively skips dump-level statements (`CREATE DATABASE`, `USE`, `DROP DATABASE`, `SET GLOBAL`, `LOCK/UNLOCK TABLES`, and session/charset `/*!40101 SET … */` / `DISABLE KEYS` conditional headers) while executing real conditional-comment DDL (`/*!50001 CREATE … VIEW */`, `/*!50003 CREATE TRIGGER */`).
@@ -69,17 +69,17 @@ Template databases (`tpl_*`) are seeded once during container initialization. Cl
 |---|---|---|
 | `GET /api/health` | — | Health check (`{"status":"ok"\|"degraded"\|"maintenance","db":"ok"\|"error","version":...}`) |
 | `GET /api/datasets` | — | Available built-in datasets (`sample-library`, `empty`) |
-| `POST /api/workspaces` | 3 live/IP, 10/h per IP, 50 global | Create an isolated workspace from a dataset |
-| `POST /api/workspaces/:wsId/reset` | — | Reset workspace to a dataset |
-| `POST /api/workspaces/:wsId/exec` | 256 KB, 60/min per IP | Execute SQL on pinned session A or B |
-| `POST /api/workspaces/:wsId/import` | 6 MB, 20/h & 30 MB/h per IP | Bulk-import a `.sql` script into the workspace |
-| `GET /api/workspaces/:wsId/schema` | 120/min per IP | Introspect tables, columns, indexes, FKs, triggers, views |
-| `POST /api/workspaces/:wsId/sessions/:session/kill` | — | `KILL QUERY` on a running statement |
-| `DELETE /api/workspaces/:wsId` | — | Drop workspace database and user |
+| `POST /api/workspaces` | 3 live/key, 10/h per key, 50 global | Create an isolated workspace from a dataset |
+| `POST /api/workspaces/:wsId/reset` | 10/h per key | Reset workspace to a dataset (kills/waits for busy sessions first) |
+| `POST /api/workspaces/:wsId/exec` | 256 KB, 60/min per key | Execute SQL on pinned session A or B |
+| `POST /api/workspaces/:wsId/import` | 6 MB, 20/h & 30 MB/h per key | Bulk-import a `.sql` script into the workspace |
+| `GET /api/workspaces/:wsId/schema` | 120/min per key | Introspect tables, columns, indexes, FKs, triggers, views |
+| `POST /api/workspaces/:wsId/sessions/:session/kill` | 60/min per key | `KILL QUERY` on a running statement |
+| `DELETE /api/workspaces/:wsId` | 60/min per key | Drop workspace database and user (kills/waits for busy sessions first) |
 
 ## Janitor
 
-A periodic background sweep (every 5 minutes by default):
+A periodic background sweep (every 5 minutes by default; skips workspaces/sessions with an active query):
 
 1. Expires workspaces past their idle TTL (**2 h** default) or absolute max lifetime (**12 h** default).
 2. Closes idle pinned sessions (**10 min** default), rolling back any open transaction first.

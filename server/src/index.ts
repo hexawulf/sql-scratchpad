@@ -1,5 +1,12 @@
 export { loadConfig, parseIpAllowList, parseTrustProxy, type AppConfig } from './config.js';
-export { IpHasher, buildLoggerOptions, PINO_REDACT_PATHS, sqlLogMeta } from './logger.js';
+export {
+  IpHasher,
+  buildLoggerOptions,
+  normalizeClientIp,
+  unwrapMappedIpv4,
+  PINO_REDACT_PATHS,
+  sqlLogMeta,
+} from './logger.js';
 export { createAdminPool, checkDbHealth } from './db.js';
 export { loadDatasets } from './datasets.js';
 export { ApiError, formatApiError, fastifyErrorHandler } from './errors.js';

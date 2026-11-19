@@ -6,7 +6,7 @@ import dotenv from 'dotenv';
 import mysql, { type RowDataPacket } from 'mysql2/promise';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { ExecResponse, ImportResponse } from '@sql-scratchpad/shared';
-import { buildApp, loadConfig, type AppContext } from './index.js';
+import { IpHasher, buildApp, loadConfig, type AppContext } from './index.js';
 import {
   BENCHMARK_BOMB_SQL,
   DELIMITER_ABUSE_SQL,
@@ -564,5 +564,416 @@ describe('SQL Scratchpad M8-lite hostile corpus & hardening integration (real Ma
     expect(fiveMbImportBody.error).toBeDefined();
 
     await assertCanaryHealthy(bystander.wsId);
+  });
+
+  it('F1: shares 3-workspace cap within same IPv6 /64 and between plain IPv4 and IPv4-mapped IPv6, but isolates different /64s', async () => {
+    const rlCfg = loadConfig({
+      ...process.env,
+      LOG_LEVEL: 'silent',
+      TRUST_PROXY: '10.0.0.1',
+    });
+    const rlCtx = await buildApp({
+      config: rlCfg,
+      adminPool: ctx.adminPool,
+      enableRateLimit: true,
+    });
+    const localWsIds: string[] = [];
+
+    try {
+      for (const addr of [
+        '2001:db8:abcd:1234::1',
+        '2001:db8:abcd:1234::2',
+        '2001:db8:abcd:1234::3',
+      ]) {
+        const res = await rlCtx.app.inject({
+          method: 'POST',
+          url: '/api/workspaces',
+          remoteAddress: '10.0.0.1',
+          headers: { 'x-forwarded-for': addr },
+          payload: { dataset: 'empty' },
+        });
+        expect(res.statusCode).toBe(201);
+        localWsIds.push((JSON.parse(res.body) as { wsId: string }).wsId);
+      }
+
+      // 4th create from another host in the SAME /64 must hit 429 PER_IP_WORKSPACE_LIMIT
+      const same64Blocked = await rlCtx.app.inject({
+        method: 'POST',
+        url: '/api/workspaces',
+        remoteAddress: '10.0.0.1',
+        headers: { 'x-forwarded-for': '2001:db8:abcd:1234::ffff' },
+        payload: { dataset: 'empty' },
+      });
+      expect(same64Blocked.statusCode).toBe(429);
+      expect(Number(same64Blocked.headers['retry-after'])).toBeGreaterThan(0);
+      expect(JSON.parse(same64Blocked.body)).toMatchObject({
+        error: { code: 'PER_IP_WORKSPACE_LIMIT' },
+      });
+
+      // Different /64 must succeed
+      const diff64Ok = await rlCtx.app.inject({
+        method: 'POST',
+        url: '/api/workspaces',
+        remoteAddress: '10.0.0.1',
+        headers: { 'x-forwarded-for': '2001:db8:abcd:5678::1' },
+        payload: { dataset: 'empty' },
+      });
+      expect(diff64Ok.statusCode).toBe(201);
+      localWsIds.push((JSON.parse(diff64Ok.body) as { wsId: string }).wsId);
+
+      // Plain IPv4 + IPv4-mapped IPv6 share one 3-workspace cap
+      for (const addr of ['203.0.113.88', '::ffff:203.0.113.88', '203.0.113.88']) {
+        const res = await rlCtx.app.inject({
+          method: 'POST',
+          url: '/api/workspaces',
+          remoteAddress: '10.0.0.1',
+          headers: { 'x-forwarded-for': addr },
+          payload: { dataset: 'empty' },
+        });
+        expect(res.statusCode).toBe(201);
+        localWsIds.push((JSON.parse(res.body) as { wsId: string }).wsId);
+      }
+
+      const mappedBlocked = await rlCtx.app.inject({
+        method: 'POST',
+        url: '/api/workspaces',
+        remoteAddress: '10.0.0.1',
+        headers: { 'x-forwarded-for': '::ffff:203.0.113.88' },
+        payload: { dataset: 'empty' },
+      });
+      expect(mappedBlocked.statusCode).toBe(429);
+      expect(Number(mappedBlocked.headers['retry-after'])).toBeGreaterThan(0);
+      expect(JSON.parse(mappedBlocked.body)).toMatchObject({
+        error: { code: 'PER_IP_WORKSPACE_LIMIT' },
+      });
+    } finally {
+      for (const id of localWsIds) {
+        await rlCtx.app.inject({ method: 'DELETE', url: `/api/workspaces/${id}` });
+      }
+      await rlCtx.app.close();
+    }
+  });
+
+  it('F2: rate-limits /reset (10/h), /kill (60/min), and DELETE (60/min) with Retry-After on 429', async () => {
+    const rlCfg = loadConfig({
+      ...process.env,
+      LOG_LEVEL: 'silent',
+      TRUST_PROXY: '',
+    });
+    const rlCtx = await buildApp({
+      config: rlCfg,
+      adminPool: ctx.adminPool,
+      enableRateLimit: true,
+    });
+    let wsId = '';
+
+    try {
+      const created = await rlCtx.app.inject({
+        method: 'POST',
+        url: '/api/workspaces',
+        remoteAddress: '198.51.100.60',
+        payload: { dataset: 'empty' },
+      });
+      expect(created.statusCode).toBe(201);
+      wsId = (JSON.parse(created.body) as { wsId: string }).wsId;
+
+      // /reset: 10 allowed per hour, 11th -> 429 + Retry-After
+      for (let i = 0; i < 10; i += 1) {
+        const res = await rlCtx.app.inject({
+          method: 'POST',
+          url: `/api/workspaces/${wsId}/reset`,
+          remoteAddress: '198.51.100.60',
+          payload: { dataset: 'empty' },
+        });
+        expect(res.statusCode, `reset #${i + 1}`).toBe(200);
+      }
+      const reset11 = await rlCtx.app.inject({
+        method: 'POST',
+        url: `/api/workspaces/${wsId}/reset`,
+        remoteAddress: '198.51.100.60',
+        payload: { dataset: 'empty' },
+      });
+      expect(reset11.statusCode).toBe(429);
+      expect(Number(reset11.headers['retry-after'])).toBeGreaterThan(0);
+
+      // /kill: 60 allowed per minute, 61st -> 429 + Retry-After
+      for (let i = 0; i < 60; i += 1) {
+        const res = await rlCtx.app.inject({
+          method: 'POST',
+          url: `/api/workspaces/${wsId}/sessions/A/kill`,
+          remoteAddress: '198.51.100.61',
+        });
+        expect(res.statusCode).toBe(200);
+      }
+      const kill61 = await rlCtx.app.inject({
+        method: 'POST',
+        url: `/api/workspaces/${wsId}/sessions/A/kill`,
+        remoteAddress: '198.51.100.61',
+      });
+      expect(kill61.statusCode).toBe(429);
+      expect(Number(kill61.headers['retry-after'])).toBeGreaterThan(0);
+
+      // DELETE: 60 allowed per minute, 61st -> 429 + Retry-After
+      for (let i = 0; i < 60; i += 1) {
+        const res = await rlCtx.app.inject({
+          method: 'DELETE',
+          url: '/api/workspaces/aaaaaaaaaaaaaaaaaaaaaaaaaa',
+          remoteAddress: '198.51.100.62',
+        });
+        expect(res.statusCode).toBe(404);
+      }
+      const del61 = await rlCtx.app.inject({
+        method: 'DELETE',
+        url: '/api/workspaces/aaaaaaaaaaaaaaaaaaaaaaaaaa',
+        remoteAddress: '198.51.100.62',
+      });
+      expect(del61.statusCode).toBe(429);
+      expect(Number(del61.headers['retry-after'])).toBeGreaterThan(0);
+    } finally {
+      if (wsId) {
+        await rlCtx.app.inject({
+          method: 'DELETE',
+          url: `/api/workspaces/${wsId}`,
+          remoteAddress: '198.51.100.69',
+        });
+      }
+      await rlCtx.app.close();
+    }
+  });
+
+  it('F3: rotating the daily log salt does not reset the 3-workspace per-IP cap', async () => {
+    const day1 = new Date('2026-11-19T23:59:00Z');
+    const day2 = new Date('2026-11-20T00:01:00Z');
+    const ipHasher = new IpHasher(day1);
+    const rlCfg = loadConfig({
+      ...process.env,
+      LOG_LEVEL: 'silent',
+      TRUST_PROXY: '',
+    });
+    const rlCtx = await buildApp({
+      config: rlCfg,
+      adminPool: ctx.adminPool,
+      enableRateLimit: true,
+      ipHasher,
+    });
+    const localWsIds: string[] = [];
+
+    try {
+      const logHashBefore = ipHasher.hash('198.51.100.70', day1);
+
+      for (let i = 0; i < 3; i += 1) {
+        const res = await rlCtx.app.inject({
+          method: 'POST',
+          url: '/api/workspaces',
+          remoteAddress: '198.51.100.70',
+          payload: { dataset: 'empty' },
+        });
+        expect(res.statusCode).toBe(201);
+        localWsIds.push((JSON.parse(res.body) as { wsId: string }).wsId);
+      }
+
+      // Simulate UTC midnight log-salt rotation
+      const logHashAfter = ipHasher.hash('198.51.100.70', day2);
+      expect(logHashAfter).not.toBe(logHashBefore);
+
+      // 4th create from the SAME IP must still hit the 3-workspace cap
+      const fourthAfterRotation = await rlCtx.app.inject({
+        method: 'POST',
+        url: '/api/workspaces',
+        remoteAddress: '198.51.100.70',
+        payload: { dataset: 'empty' },
+      });
+      expect(fourthAfterRotation.statusCode).toBe(429);
+      expect(Number(fourthAfterRotation.headers['retry-after'])).toBeGreaterThan(0);
+      expect(JSON.parse(fourthAfterRotation.body)).toMatchObject({
+        error: { code: 'PER_IP_WORKSPACE_LIMIT' },
+      });
+    } finally {
+      for (const id of localWsIds) {
+        await rlCtx.app.inject({
+          method: 'DELETE',
+          url: `/api/workspaces/${id}`,
+          remoteAddress: '198.51.100.71',
+        });
+      }
+      await rlCtx.app.close();
+    }
+  });
+
+  it('F4: reset during SLEEP(4) on A & B kills queries cleanly, delete during import aborts cleanly, janitor skips busy sessions, and error paths leak no locks', async () => {
+    // Part A: reset during SLEEP(4) on BOTH session A and session B
+    const wsReset = await createWs('sample-library', '203.0.113.42');
+    const sleepA = execRaw(wsReset.wsId, 'SELECT SLEEP(4);', 'A');
+    const sleepB = execRaw(wsReset.wsId, 'SELECT SLEEP(4);', 'B');
+
+    await new Promise((r) => setTimeout(r, 300));
+
+    const resetStart = Date.now();
+    const resetRes = await ctx.app.inject({
+      method: 'POST',
+      url: `/api/workspaces/${wsReset.wsId}/reset`,
+      remoteAddress: CLIENT_IP,
+      payload: { dataset: 'empty' },
+    });
+    const resetElapsed = Date.now() - resetStart;
+
+    const [resA, resB] = await Promise.all([sleepA, sleepB]);
+    expect(resetRes.statusCode).toBe(200);
+    expect(resetElapsed).toBeLessThan(3500);
+
+    // Both SLEEP(4) calls must be interrupted via KILL QUERY (errno 1317), not torn down mid-query with PROTOCOL_CONNECTION_LOST
+    for (const r of [resA, resB]) {
+      expect(r.statusCode).toBe(200);
+      const body = JSON.parse(r.body) as ExecResponse;
+      expect(body.results[0]?.kind).toBe('error');
+      expect(body.results[0]?.error?.errno).toBe(1317);
+    }
+
+    // Locks must be cleanly released and both sessions usable after reset
+    const entryAfterReset = ctx.workspaceManager.getWorkspace(wsReset.wsId);
+    expect(entryAfterReset.sessionLocks.A).toBeFalsy();
+    expect(entryAfterReset.sessionLocks.B).toBeFalsy();
+    const postA = await execRaw(wsReset.wsId, 'SELECT 1;', 'A');
+    const postB = await execRaw(wsReset.wsId, 'SELECT 2;', 'B');
+    expect((JSON.parse(postA.body) as ExecResponse).results[0]?.rows).toEqual([[1]]);
+    expect((JSON.parse(postB.body) as ExecResponse).results[0]?.rows).toEqual([[2]]);
+
+    // Part B: delete during an active import
+    const wsDel = await createWs('empty', '203.0.113.43');
+    const importLines = [
+      'CREATE TABLE del_race (id INT PRIMARY KEY);',
+      'SELECT SLEEP(4);',
+    ];
+    for (let i = 1; i <= 200; i += 1) {
+      importLines.push(`INSERT INTO del_race VALUES (${i});`);
+    }
+    const importPromise = ctx.app.inject({
+      method: 'POST',
+      url: `/api/workspaces/${wsDel.wsId}/import`,
+      remoteAddress: CLIENT_IP,
+      payload: { sql: importLines.join('\n'), mode: 'append' },
+    });
+
+    await new Promise((r) => setTimeout(r, 300));
+
+    const delStart = Date.now();
+    const delRes = await ctx.app.inject({
+      method: 'DELETE',
+      url: `/api/workspaces/${wsDel.wsId}`,
+      remoteAddress: CLIENT_IP,
+    });
+    const delElapsed = Date.now() - delStart;
+    createdWsIds.delete(wsDel.wsId);
+
+    const impDone = await importPromise;
+    expect(delRes.statusCode).toBe(200);
+    expect(delElapsed).toBeLessThan(3500);
+    expect(impDone.statusCode).toBe(200);
+    const impBody = JSON.parse(impDone.body) as ImportResponse;
+    expect(impBody.ok).toBe(false);
+    expect(
+      impBody.error?.errno === 1317 || impBody.error?.code === 'QUERY_INTERRUPTED',
+      `expected clean interrupt, got ${JSON.stringify(impBody.error)}`,
+    ).toBe(true);
+
+    const [leftoverDb] = await ctx.adminPool.query<RowDataPacket[]>(
+      'SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = ?',
+      [wsDel.database],
+    );
+    expect(leftoverDb).toEqual([]);
+
+    // Part C: janitor skips busy sessions (expiry + idle-session + size-cap truncation)
+    const janCfg = loadConfig({
+      ...process.env,
+      LOG_LEVEL: 'silent',
+      WORKSPACE_TTL_MS: '60000',
+      WORKSPACE_MAX_TTL_MS: '120000',
+      SESSION_IDLE_TTL_MS: '50',
+      MAX_WORKSPACE_BYTES: '1',
+    });
+    const janCtx = await buildApp({
+      config: janCfg,
+      adminPool: ctx.adminPool,
+      enableRateLimit: false,
+    });
+    let janWsId = '';
+    try {
+      const c = await janCtx.app.inject({
+        method: 'POST',
+        url: '/api/workspaces',
+        remoteAddress: '198.51.100.80',
+        payload: { dataset: 'sample-library' },
+      });
+      expect(c.statusCode).toBe(201);
+      janWsId = (JSON.parse(c.body) as { wsId: string }).wsId;
+
+      const busySleep = janCtx.app.inject({
+        method: 'POST',
+        url: `/api/workspaces/${janWsId}/exec`,
+        payload: { sql: 'SELECT SLEEP(4);', session: 'A', stopOnError: true },
+      });
+      await new Promise((r) => setTimeout(r, 300));
+
+      const janEntry = janCtx.workspaceManager.getWorkspace(janWsId);
+      janEntry.expiresAt = Date.now() - 1;
+      if (janEntry.sessions.A) {
+        janEntry.sessions.A.lastUsedAt = Date.now() - 10_000;
+      }
+
+      const sweep = await janCtx.workspaceManager.runJanitorSweep();
+      expect(sweep.expiredWorkspaces).toBe(0);
+      expect(sweep.closedIdleSessions).toBe(0);
+      expect(sweep.truncatedWorkspaces).toBe(0);
+
+      // Restore expiry before invoking /kill so the workspace is live, then kill the sleep
+      janEntry.expiresAt = Date.now() + 60_000;
+      const killJanRes = await janCtx.app.inject({
+        method: 'POST',
+        url: `/api/workspaces/${janWsId}/sessions/A/kill`,
+      });
+      expect(killJanRes.statusCode).toBe(200);
+      const busyDone = await busySleep;
+      expect(busyDone.statusCode).toBe(200);
+      expect((JSON.parse(busyDone.body) as ExecResponse).results[0]?.error?.errno).toBe(1317);
+
+      // Part D: no lock leaks on error paths (unknown dataset reset AND teardown timeout)
+      const badReset = await janCtx.app.inject({
+        method: 'POST',
+        url: `/api/workspaces/${janWsId}/reset`,
+        payload: { dataset: 'nonexistent-dataset' },
+      });
+      expect(badReset.statusCode).toBe(400);
+      expect(janEntry.sessionLocks.A).toBeFalsy();
+      expect(janEntry.sessionLocks.B).toBeFalsy();
+
+      // Simulate a stuck session A lock -> reset acquires B then times out on A and MUST release B + flags
+      janEntry.sessionLocks.A = true;
+      await expect(
+        janCtx.workspaceManager.resetWorkspace(janWsId, 'empty', 120),
+      ).rejects.toMatchObject({ statusCode: 503, code: 'SESSION_TEARDOWN_TIMEOUT' });
+      expect(janEntry.sessionLocks.B).toBeFalsy();
+      expect(janEntry.teardownActive).toBe(false);
+      expect(janEntry.sessionAbort.A).toBeFalsy();
+      expect(janEntry.sessionAbort.B).toBeFalsy();
+      janEntry.sessionLocks.A = false;
+
+      const afterTimeoutA = await janCtx.app.inject({
+        method: 'POST',
+        url: `/api/workspaces/${janWsId}/exec`,
+        payload: { sql: 'SELECT 42;', session: 'A', stopOnError: true },
+      });
+      const afterTimeoutB = await janCtx.app.inject({
+        method: 'POST',
+        url: `/api/workspaces/${janWsId}/exec`,
+        payload: { sql: 'SELECT 43;', session: 'B', stopOnError: true },
+      });
+      expect((JSON.parse(afterTimeoutA.body) as ExecResponse).results[0]?.rows).toEqual([[42]]);
+      expect((JSON.parse(afterTimeoutB.body) as ExecResponse).results[0]?.rows).toEqual([[43]]);
+    } finally {
+      if (janWsId) {
+        await janCtx.app.inject({ method: 'DELETE', url: `/api/workspaces/${janWsId}` });
+      }
+      await janCtx.app.close();
+    }
   });
 });

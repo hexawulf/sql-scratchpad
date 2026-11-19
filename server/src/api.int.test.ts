@@ -394,7 +394,7 @@ describe('SQL Scratchpad API integration (real MariaDB 11.4)', () => {
   });
 
   it(
-    'imports a 20,000-statement generated script in under 90 s on the workspace user',
+    'imports a 20,000-statement generated script in under 75 s on the workspace user',
     async () => {
       const { wsId } = await createWs('empty');
 
@@ -411,7 +411,7 @@ describe('SQL Scratchpad API integration (real MariaDB 11.4)', () => {
       expect(body.totalStatements).toBe(20_000);
       expect(body.statementsRun).toBe(20_000);
       expect(body.statementsOk).toBe(20_000);
-      expect(body.durationMs).toBeLessThan(90_000);
+      expect(body.durationMs).toBeLessThan(75_000);
       expect(body.tablesCreated).toEqual(['bulk_items']);
 
       const cnt = await execSql(wsId, 'SELECT COUNT(*) FROM bulk_items;');

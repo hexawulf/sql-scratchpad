@@ -114,7 +114,13 @@ export interface WorkspaceEntry {
   ownerIpHash?: string;
   sessions: Partial<Record<SessionId, PinnedSession>>;
   sessionLocks: Partial<Record<SessionId, boolean>>;
+  sessionWaiters: Partial<Record<SessionId, Array<() => void>>>;
+  sessionAbort: Partial<Record<SessionId, boolean>>;
+  teardownActive: boolean;
+  deleting: boolean;
 }
+
+const DEFAULT_TEARDOWN_TIMEOUT_MS = 10_000;
 
 interface TableNameRow extends RowDataPacket {
   TABLE_NAME: string;
@@ -167,15 +173,34 @@ export class WorkspaceManager {
 
   getWorkspace(wsId: string): WorkspaceEntry {
     const ws = this.workspaces.get(wsId);
-    if (!ws) {
+    if (!ws || ws.deleting) {
       throw new ApiError(404, 'WORKSPACE_NOT_FOUND', 'Workspace not found or expired');
     }
     const now = Date.now();
     if (now >= ws.expiresAt || now >= ws.absoluteExpiresAt) {
-      void this.deleteWorkspace(wsId).catch(() => {});
+      if (!this.isWorkspaceBusy(ws)) {
+        void this.deleteWorkspace(wsId).catch(() => {});
+      }
       throw new ApiError(404, 'WORKSPACE_EXPIRED', 'Workspace expired');
     }
     return ws;
+  }
+
+  isSessionBusy(ws: WorkspaceEntry, sid: SessionId): boolean {
+    return Boolean(ws.sessionLocks[sid] || ws.sessions[sid]?.busy);
+  }
+
+  isWorkspaceBusy(ws: WorkspaceEntry): boolean {
+    return Boolean(
+      ws.teardownActive ||
+        ws.deleting ||
+        this.isSessionBusy(ws, 'A') ||
+        this.isSessionBusy(ws, 'B'),
+    );
+  }
+
+  isSessionAbortRequested(ws: WorkspaceEntry, sid: SessionId): boolean {
+    return Boolean(ws.sessionAbort[sid] || ws.deleting);
   }
 
   touchWorkspace(ws: WorkspaceEntry): void {
@@ -212,9 +237,10 @@ export class WorkspaceManager {
 
     const now = Date.now();
 
-    // Evict any already-expired workspaces lazily before checking caps
+    // Evict any already-expired workspaces lazily before checking caps (skip busy ones)
     for (const [expiredId, existing] of [...this.workspaces.entries()]) {
       if (now >= existing.expiresAt || now >= existing.absoluteExpiresAt) {
+        if (this.isWorkspaceBusy(existing)) continue;
         await this.deleteWorkspace(expiredId).catch(() => {});
       }
     }
@@ -292,6 +318,10 @@ export class WorkspaceManager {
       ownerIpHash,
       sessions: {},
       sessionLocks: {},
+      sessionWaiters: {},
+      sessionAbort: {},
+      teardownActive: false,
+      deleting: false,
     };
     this.workspaces.set(wsId, entry);
 
@@ -302,37 +332,216 @@ export class WorkspaceManager {
     };
   }
 
-  async resetWorkspace(wsId: string, datasetId: string): Promise<{ database: string }> {
-    this.assertValidDataset(datasetId);
-    const ws = this.getWorkspace(wsId);
-
-    await this.closeAllSessions(ws);
-    await this.dropDbAndUser(ws.database, ws.dbUser);
-
-    const newPassword = randomBytes(32).toString('base64url');
-    ws.password = newPassword;
-    ws.dataset = datasetId;
-
-    await this.provisionDbAndUser(ws.database, ws.dbUser, ws.password);
-    if (datasetId !== 'empty') {
-      await this.cloneTemplate(templateDbName(datasetId), ws.database, ws.dbUser, ws.password);
+  private notifySessionWaiters(ws: WorkspaceEntry, sid: SessionId): void {
+    const waiters = ws.sessionWaiters[sid];
+    if (!waiters || waiters.length === 0) return;
+    ws.sessionWaiters[sid] = [];
+    for (const resolve of waiters) {
+      resolve();
     }
-
-    this.touchWorkspace(ws);
-    return { database: ws.database };
   }
 
-  async deleteWorkspace(wsId: string): Promise<void> {
+  private waitForAnySessionRelease(
+    ws: WorkspaceEntry,
+    pending: SessionId[],
+    maxWaitMs: number,
+  ): Promise<void> {
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const cleanups: Array<() => void> = [];
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        for (const fn of cleanups) fn();
+        resolve();
+      };
+      const timer = setTimeout(done, Math.max(1, maxWaitMs));
+      for (const sid of pending) {
+        const list = (ws.sessionWaiters[sid] ??= []);
+        list.push(done);
+        cleanups.push(() => {
+          const arr = ws.sessionWaiters[sid];
+          if (!arr) return;
+          const idx = arr.indexOf(done);
+          if (idx !== -1) arr.splice(idx, 1);
+        });
+      }
+    });
+  }
+
+  private async killSessionThread(ws: WorkspaceEntry, sid: SessionId): Promise<void> {
+    const session = ws.sessions[sid];
+    if (!session) return;
+    try {
+      await this.adminPool.query(`KILL QUERY ${Math.trunc(session.threadId)}`);
+    } catch (err) {
+      const mysqlErr = err as { errno?: number };
+      // ER_NO_SUCH_THREAD (1094) means query/connection already ended
+      if (mysqlErr.errno !== 1094) {
+        throw err;
+      }
+    }
+  }
+
+  private async acquireAllSessionLocksForTeardown(
+    ws: WorkspaceEntry,
+    timeoutMs = DEFAULT_TEARDOWN_TIMEOUT_MS,
+  ): Promise<SessionId[]> {
+    const acquired: SessionId[] = [];
+    const deadline = Date.now() + timeoutMs;
+    ws.sessionAbort.A = true;
+    ws.sessionAbort.B = true;
+
+    try {
+      while (acquired.length < 2) {
+        for (const sid of ['A', 'B'] as const) {
+          if (acquired.includes(sid)) continue;
+          if (!ws.sessionLocks[sid] && !ws.sessions[sid]?.busy) {
+            ws.sessionLocks[sid] = true;
+            acquired.push(sid);
+          }
+        }
+        if (acquired.length === 2) {
+          return acquired;
+        }
+
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+          throw new ApiError(
+            503,
+            'SESSION_TEARDOWN_TIMEOUT',
+            'Timed out waiting for active session queries to stop',
+          );
+        }
+
+        const pending = (['A', 'B'] as const).filter((sid) => !acquired.includes(sid));
+        await Promise.all(
+          pending.map((sid) =>
+            this.killSessionThread(ws, sid).catch((err) => {
+              this.logger.warn(
+                { err, wsId: ws.wsId, session: sid },
+                'KILL QUERY during teardown failed',
+              );
+            }),
+          ),
+        );
+
+        // Re-check immediately after KILL QUERY in case release already happened during await
+        let needWait = false;
+        for (const sid of pending) {
+          if (!ws.sessionLocks[sid] && !ws.sessions[sid]?.busy) {
+            ws.sessionLocks[sid] = true;
+            acquired.push(sid);
+          } else {
+            needWait = true;
+          }
+        }
+        if (!needWait || acquired.length === 2) {
+          continue;
+        }
+
+        const stillPending = (['A', 'B'] as const).filter((sid) => !acquired.includes(sid));
+        const waitSlice = Math.min(Math.max(1, deadline - Date.now()), 200);
+        await this.waitForAnySessionRelease(ws, stillPending, waitSlice);
+      }
+      return acquired;
+    } catch (err) {
+      ws.sessionAbort.A = false;
+      ws.sessionAbort.B = false;
+      for (const sid of acquired) {
+        this.releaseSession(ws, sid);
+      }
+      throw err;
+    }
+  }
+
+  async resetWorkspace(
+    wsId: string,
+    datasetId: string,
+    timeoutMs = DEFAULT_TEARDOWN_TIMEOUT_MS,
+  ): Promise<{ database: string }> {
+    this.assertValidDataset(datasetId);
+    const ws = this.getWorkspace(wsId);
+    if (ws.teardownActive || ws.deleting) {
+      throw new ApiError(
+        409,
+        'WORKSPACE_BUSY',
+        'Workspace is currently resetting or being deleted',
+      );
+    }
+
+    ws.teardownActive = true;
+    let acquired: SessionId[] = [];
+    try {
+      acquired = await this.acquireAllSessionLocksForTeardown(ws, timeoutMs);
+      await this.closeAllSessions(ws);
+      await this.dropDbAndUser(ws.database, ws.dbUser);
+
+      const newPassword = randomBytes(32).toString('base64url');
+      ws.password = newPassword;
+      ws.dataset = datasetId;
+
+      await this.provisionDbAndUser(ws.database, ws.dbUser, ws.password);
+      if (datasetId !== 'empty') {
+        await this.cloneTemplate(templateDbName(datasetId), ws.database, ws.dbUser, ws.password);
+      }
+
+      this.touchWorkspace(ws);
+      return { database: ws.database };
+    } finally {
+      ws.sessionAbort.A = false;
+      ws.sessionAbort.B = false;
+      ws.teardownActive = false;
+      for (const sid of acquired) {
+        this.releaseSession(ws, sid);
+      }
+    }
+  }
+
+  async deleteWorkspace(wsId: string, timeoutMs = DEFAULT_TEARDOWN_TIMEOUT_MS): Promise<void> {
     const ws = this.workspaces.get(wsId);
-    if (!ws) {
+    if (!ws || ws.deleting) {
       throw new ApiError(404, 'WORKSPACE_NOT_FOUND', 'Workspace not found or expired');
     }
-    this.workspaces.delete(wsId);
-    await this.closeAllSessions(ws);
-    await this.dropDbAndUser(ws.database, ws.dbUser);
+    if (ws.teardownActive) {
+      throw new ApiError(409, 'WORKSPACE_BUSY', 'Workspace is currently resetting');
+    }
+
+    ws.deleting = true;
+    ws.teardownActive = true;
+    let acquired: SessionId[] = [];
+    let deleted = false;
+    try {
+      acquired = await this.acquireAllSessionLocksForTeardown(ws, timeoutMs);
+      this.workspaces.delete(wsId);
+      deleted = true;
+      await this.closeAllSessions(ws);
+      await this.dropDbAndUser(ws.database, ws.dbUser);
+    } finally {
+      if (!deleted) {
+        ws.deleting = false;
+      }
+      ws.sessionAbort.A = false;
+      ws.sessionAbort.B = false;
+      ws.teardownActive = false;
+      for (const sid of acquired) {
+        this.releaseSession(ws, sid);
+      }
+    }
   }
 
   async acquireSession(ws: WorkspaceEntry, sessionId: SessionId): Promise<PinnedSession> {
+    if (ws.deleting) {
+      throw new ApiError(404, 'WORKSPACE_NOT_FOUND', 'Workspace not found or expired');
+    }
+    if (ws.teardownActive) {
+      throw new ApiError(
+        409,
+        'WORKSPACE_BUSY',
+        'Workspace is currently resetting or being deleted',
+      );
+    }
     if (ws.sessionLocks[sessionId] || ws.sessions[sessionId]?.busy) {
       throw new ApiError(
         409,
@@ -343,10 +552,17 @@ export class WorkspaceManager {
     ws.sessionLocks[sessionId] = true;
     try {
       const session = await this.getOrCreateSession(ws, sessionId);
+      if (ws.deleting || ws.teardownActive || ws.sessionAbort[sessionId]) {
+        throw new ApiError(
+          409,
+          'WORKSPACE_BUSY',
+          'Workspace is currently resetting or being deleted',
+        );
+      }
       session.busy = true;
       return session;
     } catch (err) {
-      ws.sessionLocks[sessionId] = false;
+      this.releaseSession(ws, sessionId);
       throw err;
     }
   }
@@ -357,6 +573,7 @@ export class WorkspaceManager {
       session.lastUsedAt = Date.now();
     }
     ws.sessionLocks[sessionId] = false;
+    this.notifySessionWaiters(ws, sessionId);
   }
 
   async getOrCreateSession(ws: WorkspaceEntry, sessionId: SessionId): Promise<PinnedSession> {
@@ -407,19 +624,7 @@ export class WorkspaceManager {
 
   async killSessionQuery(wsId: string, sessionId: SessionId): Promise<void> {
     const ws = this.getWorkspace(wsId);
-    const session = ws.sessions[sessionId];
-    if (!session) {
-      return;
-    }
-    try {
-      await this.adminPool.query(`KILL QUERY ${Math.trunc(session.threadId)}`);
-    } catch (err) {
-      const mysqlErr = err as { errno?: number };
-      // ER_NO_SUCH_THREAD (1094) means query/connection already ended
-      if (mysqlErr.errno !== 1094) {
-        throw err;
-      }
-    }
+    await this.killSessionThread(ws, sessionId);
   }
 
   async closeAllSessions(ws: WorkspaceEntry): Promise<void> {
@@ -508,61 +713,89 @@ export class WorkspaceManager {
     let closedIdleSessions = 0;
     let truncatedWorkspaces = 0;
 
-    // 1. Workspace idle TTL (2 h) and absolute max TTL (12 h)
+    // 1. Workspace idle TTL (2 h) and absolute max TTL (12 h) — skip busy workspaces
     for (const [wsId, ws] of [...this.workspaces.entries()]) {
       if (now >= ws.expiresAt || now >= ws.absoluteExpiresAt) {
+        if (this.isWorkspaceBusy(ws)) {
+          this.logger.debug(
+            { wsId, database: ws.database },
+            'Skipping expired workspace with busy session until next janitor sweep',
+          );
+          continue;
+        }
         const reason = now >= ws.absoluteExpiresAt ? 'absolute_ttl' : 'idle_ttl';
         this.logger.info({ wsId, database: ws.database, reason }, 'Expiring workspace');
-        await this.deleteWorkspace(wsId).catch((err) => {
+        try {
+          await this.deleteWorkspace(wsId);
+          expiredWorkspaces += 1;
+        } catch (err) {
           this.logger.warn({ err, wsId }, 'Failed to expire workspace');
-        });
-        expiredWorkspaces += 1;
+        }
       }
     }
 
-    // 2. Idle session timeout (10 min) with open-tx rollback
+    // 2. Idle session timeout (10 min) with open-tx rollback — skip busy/locked sessions
     for (const ws of this.workspaces.values()) {
+      if (ws.teardownActive || ws.deleting) continue;
       for (const sid of ['A', 'B'] as const) {
         const session = ws.sessions[sid];
-        if (!session || session.busy) continue;
+        if (!session || session.busy || ws.sessionLocks[sid]) continue;
         if (now - session.lastUsedAt < this.config.SESSION_IDLE_TTL_MS) continue;
 
+        ws.sessionLocks[sid] = true;
         try {
-          const [txRows] = await session.conn.query<RowDataPacket[]>(
-            'SELECT @@in_transaction AS in_tx',
-          );
-          const inTx = Number(txRows[0]?.in_tx ?? 0) === 1;
-          if (inTx) {
-            await session.conn.query('ROLLBACK');
-            this.logger.info(
-              { wsId: ws.wsId, session: sid },
-              'Rolled back idle open transaction',
-            );
+          const current = ws.sessions[sid];
+          if (!current || current !== session || current.busy || ws.teardownActive || ws.deleting) {
+            continue;
           }
-        } catch {
-          // Connection may already be dead
+          try {
+            const [txRows] = await session.conn.query<RowDataPacket[]>(
+              'SELECT @@in_transaction AS in_tx',
+            );
+            const inTx = Number(txRows[0]?.in_tx ?? 0) === 1;
+            if (inTx) {
+              await session.conn.query('ROLLBACK');
+              this.logger.info(
+                { wsId: ws.wsId, session: sid },
+                'Rolled back idle open transaction',
+              );
+            }
+          } catch {
+            // Connection may already be dead
+          }
+          delete ws.sessions[sid];
+          await session.conn.end().catch(() => {
+            session.conn.destroy();
+          });
+          closedIdleSessions += 1;
+        } finally {
+          this.releaseSession(ws, sid);
         }
-        delete ws.sessions[sid];
-        await session.conn.end().catch(() => {
-          session.conn.destroy();
-        });
-        closedIdleSessions += 1;
       }
     }
 
-    // 3. Per-workspace 50 MB size cap
+    // 3. Per-workspace 50 MB size cap — skip busy workspaces
     const sizes = await this.getWorkspaceSizes();
     for (const ws of [...this.workspaces.values()]) {
       const bytes = sizes.get(ws.database) ?? 0;
       if (bytes > this.config.MAX_WORKSPACE_BYTES) {
+        if (this.isWorkspaceBusy(ws)) {
+          this.logger.info(
+            { wsId: ws.wsId, database: ws.database, bytes, cap: this.config.MAX_WORKSPACE_BYTES },
+            'Oversized workspace has busy session; deferring truncation to next sweep',
+          );
+          continue;
+        }
         this.logger.warn(
           { wsId: ws.wsId, database: ws.database, bytes, cap: this.config.MAX_WORKSPACE_BYTES },
           'Workspace exceeded size cap; truncating and re-provisioning',
         );
-        await this.resetWorkspace(ws.wsId, ws.dataset).catch((err) => {
+        try {
+          await this.resetWorkspace(ws.wsId, ws.dataset);
+          truncatedWorkspaces += 1;
+        } catch (err) {
           this.logger.error({ err, wsId: ws.wsId }, 'Failed to reset oversized workspace');
-        });
-        truncatedWorkspaces += 1;
+        }
       }
     }
 

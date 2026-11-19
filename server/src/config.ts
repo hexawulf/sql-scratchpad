@@ -95,6 +95,7 @@ const EnvSchema = z.object({
     .default(5 * 60 * 1000),
   MAX_WORKSPACES: z.coerce.number().int().positive().default(50),
   MAX_WORKSPACES_PER_IP: z.coerce.number().int().positive().default(3),
+  IPV6_PREFIX_BITS: z.coerce.number().int().min(1).max(128).default(64),
   LOADTEST_ALLOW_IPS: z
     .string()
     .optional()
@@ -129,7 +130,7 @@ const EnvSchema = z.object({
     .int()
     .positive()
     .default(5 * 1024 * 1024),
-  IMPORT_TIMEOUT_MS: z.coerce.number().int().positive().default(90 * 1000),
+  IMPORT_TIMEOUT_MS: z.coerce.number().int().positive().default(75 * 1000),
   IMPORT_MAX_STATEMENTS: z.coerce.number().int().positive().default(60_000),
   IMPORT_BYTE_BUDGET_PER_HOUR: z.coerce
     .number()

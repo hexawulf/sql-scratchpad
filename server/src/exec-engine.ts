@@ -305,6 +305,22 @@ export class ExecEngine {
         const stmt = statements[i]!;
         const t0 = process.hrtime.bigint();
 
+        if (this.workspaceManager.isSessionAbortRequested(ws, req.session)) {
+          results.push({
+            index: i,
+            sql: stmt.sql,
+            startLine: stmt.startLine,
+            kind: 'error',
+            error: {
+              code: 'ER_QUERY_INTERRUPTED',
+              errno: 1317,
+              message: 'Query execution was interrupted',
+            },
+            durationMs: 0,
+          });
+          break;
+        }
+
         const deniedMsg = checkDenylist(stmt.sql, ws.database);
         if (deniedMsg) {
           results.push({
@@ -426,7 +442,7 @@ export class ExecEngine {
       }
 
       let txOpen = false;
-      if (!connectionBroken) {
+      if (!connectionBroken && !this.workspaceManager.isSessionAbortRequested(ws, req.session)) {
         try {
           const [txRows] = await session.conn.query<RowDataPacket[]>(
             'SELECT @@in_transaction AS in_tx',
@@ -441,7 +457,9 @@ export class ExecEngine {
     } finally {
       this.workspaceManager.releaseSession(ws, req.session, session);
       if (connectionBroken) {
-        delete ws.sessions[req.session];
+        if (ws.sessions[req.session] === session) {
+          delete ws.sessions[req.session];
+        }
         await session.conn.end().catch(() => {
           session.conn.destroy();
         });

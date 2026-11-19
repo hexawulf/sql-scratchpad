@@ -20,7 +20,7 @@ import type {
   SessionId,
 } from '@sql-scratchpad/shared';
 import { parseIpAllowList, parseTrustProxy, type AppConfig } from './config.js';
-import { IpHasher, buildLoggerOptions, sqlLogMeta } from './logger.js';
+import { IpHasher, buildLoggerOptions, sqlLogMeta, unwrapMappedIpv4 } from './logger.js';
 import { checkDbHealth, createAdminPool } from './db.js';
 import { loadDatasets } from './datasets.js';
 import { fastifyErrorHandler, formatApiError } from './errors.js';
@@ -120,7 +120,7 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
   const adminPool = options.adminPool ?? createAdminPool(config);
   const datasets = options.datasets ?? loadDatasets();
   const rateLimitEnabled = options.enableRateLimit !== false;
-  const ipHasher = options.ipHasher ?? new IpHasher();
+  const ipHasher = options.ipHasher ?? new IpHasher(new Date(), config.IPV6_PREFIX_BITS);
   const loadtestAllowIps = parseIpAllowList(config.LOADTEST_ALLOW_IPS);
 
   const app = Fastify({
@@ -158,8 +158,8 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
   if (rateLimitEnabled) {
     await app.register(rateLimit, {
       global: false,
-      keyGenerator: (req) => ipHasher.hash(req.ip || 'unknown'),
-      allowList: (req) => loadtestAllowIps.has(req.ip),
+      keyGenerator: (req) => ipHasher.key(req.ip || 'unknown'),
+      allowList: (req) => loadtestAllowIps.has(unwrapMappedIpv4(req.ip || '')),
       addHeadersOnExceeding: {
         'x-ratelimit-limit': true,
         'x-ratelimit-remaining': true,
@@ -224,8 +224,8 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
         : undefined,
     },
     async (req, reply): Promise<CreateWorkspaceResponse> => {
-      const ownerIpHash = ipHasher.hash(req.ip || 'unknown');
-      const bypassPerIp = loadtestAllowIps.has(req.ip);
+      const ownerIpHash = ipHasher.key(req.ip || 'unknown');
+      const bypassPerIp = loadtestAllowIps.has(unwrapMappedIpv4(req.ip || ''));
       const created = await workspaceManager.createWorkspace(
         req.body.dataset,
         ownerIpHash,
@@ -240,6 +240,9 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     '/api/workspaces/:wsId/reset',
     {
       schema: { params: wsIdParamsSchema, body: datasetBodySchema },
+      config: rateLimitEnabled
+        ? { rateLimit: { max: 10, timeWindow: '1 hour' } }
+        : undefined,
     },
     async (req): Promise<ResetWorkspaceResponse> => {
       return workspaceManager.resetWorkspace(req.params.wsId, req.body.dataset);
@@ -282,11 +285,11 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
         : undefined,
       preHandler: rateLimitEnabled
         ? async (req, reply) => {
-            if (loadtestAllowIps.has(req.ip)) {
+            if (loadtestAllowIps.has(unwrapMappedIpv4(req.ip || ''))) {
               return;
             }
             const bytes = Buffer.byteLength(req.body.sql, 'utf8');
-            const decision = importByteBudget.consume(ipHasher.hash(req.ip || 'unknown'), bytes);
+            const decision = importByteBudget.consume(ipHasher.key(req.ip || 'unknown'), bytes);
             if (!decision.allowed) {
               void reply.header('Retry-After', String(decision.retryAfterSec));
               const budgetMb = Math.round(config.IMPORT_BYTE_BUDGET_PER_HOUR / (1024 * 1024));
@@ -338,6 +341,9 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     '/api/workspaces/:wsId/sessions/:session/kill',
     {
       schema: { params: killParamsSchema },
+      config: rateLimitEnabled
+        ? { rateLimit: { max: 60, timeWindow: '1 minute' } }
+        : undefined,
     },
     async (req): Promise<OkResponse> => {
       await workspaceManager.killSessionQuery(req.params.wsId, req.params.session);
@@ -349,6 +355,9 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     '/api/workspaces/:wsId',
     {
       schema: { params: wsIdParamsSchema },
+      config: rateLimitEnabled
+        ? { rateLimit: { max: 60, timeWindow: '1 minute' } }
+        : undefined,
     },
     async (req): Promise<OkResponse> => {
       await workspaceManager.deleteWorkspace(req.params.wsId);

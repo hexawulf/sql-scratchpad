@@ -5,6 +5,7 @@ import type {
   EngineAdapter,
   ExecRequest,
   ExecResponse,
+  HealthResponse,
   ImportRequest,
   ImportResponse,
   OkResponse,
@@ -67,6 +68,10 @@ export class MariaDbAdapter implements EngineAdapter {
   attach(wsId: string, database: string | null = null): void {
     this.wsId = wsId;
     this.database = database;
+  }
+
+  async fetchHealth(): Promise<HealthResponse> {
+    return this.request<HealthResponse>('/health', { method: 'GET' });
   }
 
   async fetchDatasets(): Promise<DatasetMeta[]> {

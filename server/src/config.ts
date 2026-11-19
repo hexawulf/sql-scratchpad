@@ -1,4 +1,50 @@
+import { isIP } from 'node:net';
 import { z } from 'zod';
+
+export function isValidIpOrCidr(entry: string): boolean {
+  const slashIdx = entry.indexOf('/');
+  if (slashIdx === -1) {
+    return isIP(entry) !== 0;
+  }
+  const addr = entry.slice(0, slashIdx);
+  const prefixStr = entry.slice(slashIdx + 1);
+  if (!/^\d+$/.test(prefixStr)) return false;
+  const ipVer = isIP(addr);
+  if (ipVer === 0) return false;
+  const prefix = Number(prefixStr);
+  return ipVer === 4 ? prefix >= 0 && prefix <= 32 : prefix >= 0 && prefix <= 128;
+}
+
+export function parseTrustProxy(raw?: string): string[] | false {
+  if (!raw || raw.trim() === '') return false;
+  const entries = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (entries.length === 0) return false;
+  for (const entry of entries) {
+    if (!isValidIpOrCidr(entry)) {
+      throw new Error(
+        `TRUST_PROXY entry "${entry}" is not a valid IP address or CIDR range`,
+      );
+    }
+  }
+  return entries;
+}
+
+export function parseIpAllowList(raw?: string): Set<string> {
+  if (!raw || raw.trim() === '') return new Set();
+  const entries = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  for (const entry of entries) {
+    if (isIP(entry) === 0) {
+      throw new Error(`IP allowlist entry "${entry}" is not a valid IP address`);
+    }
+  }
+  return new Set(entries);
+}
 
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -7,7 +53,20 @@ const EnvSchema = z.object({
   LOG_LEVEL: z
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
     .default('info'),
-  TRUST_PROXY: z.string().optional(),
+  TRUST_PROXY: z
+    .string()
+    .optional()
+    .refine(
+      (val) => {
+        try {
+          parseTrustProxy(val);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { message: 'TRUST_PROXY must be empty or a comma-separated list of IP addresses / CIDRs' },
+    ),
 
   DB_HOST: z.string().min(1).default('127.0.0.1'),
   DB_PORT: z.coerce.number().int().min(1).max(65535).default(3307),
@@ -18,18 +77,42 @@ const EnvSchema = z.object({
     .number()
     .int()
     .positive()
-    .default(24 * 60 * 60 * 1000),
+    .default(2 * 60 * 60 * 1000),
+  WORKSPACE_MAX_TTL_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(12 * 60 * 60 * 1000),
   SESSION_IDLE_TTL_MS: z.coerce
     .number()
     .int()
     .positive()
-    .default(15 * 60 * 1000),
+    .default(10 * 60 * 1000),
   JANITOR_INTERVAL_MS: z.coerce
     .number()
     .int()
     .positive()
     .default(5 * 60 * 1000),
   MAX_WORKSPACES: z.coerce.number().int().positive().default(50),
+  MAX_WORKSPACES_PER_IP: z.coerce.number().int().positive().default(3),
+  LOADTEST_ALLOW_IPS: z
+    .string()
+    .optional()
+    .refine(
+      (val) => {
+        try {
+          parseIpAllowList(val);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { message: 'LOADTEST_ALLOW_IPS must be empty or a comma-separated list of IP addresses' },
+    ),
+  MAINTENANCE: z
+    .string()
+    .optional()
+    .transform((v) => v === '1' || v?.toLowerCase() === 'true'),
   MAX_WORKSPACE_BYTES: z.coerce
     .number()
     .int()

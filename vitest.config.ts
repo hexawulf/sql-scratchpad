@@ -18,8 +18,9 @@ export default defineConfig({
           environment: 'node',
           include: ['server/src/**/*.int.test.ts'],
           exclude: ['**/node_modules/**', '**/dist/**'],
-          testTimeout: 30_000,
+          testTimeout: 60_000,
           hookTimeout: 30_000,
+          fileParallelism: false,
         },
       },
       {

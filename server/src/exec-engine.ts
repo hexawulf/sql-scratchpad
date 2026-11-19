@@ -13,7 +13,6 @@ import type {
   StatementWarning,
 } from '@sql-scratchpad/shared';
 import type { AppConfig } from './config.js';
-import { ApiError } from './errors.js';
 import type { WorkspaceManager } from './workspace-manager.js';
 
 export interface SplitStatement {
@@ -157,8 +156,16 @@ const DENYLIST_RULES: Array<{ pattern: RegExp; message: string }> = [
       'Not available in the playground: modifying global server variables is disabled. Use SET SESSION instead.',
   },
   {
+    pattern: /\bSET\s+PASSWORD\b/i,
+    message: 'Not available in the playground: SET PASSWORD is disabled.',
+  },
+  {
     pattern: /\b(?:UN)?INSTALL\s+(?:PLUGIN|SONAME|COMPONENT)\b/i,
     message: 'Not available in the playground: plugin management is disabled.',
+  },
+  {
+    pattern: /\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:AGGREGATE\s+)?FUNCTION\b[\s\S]*\bSONAME\b/i,
+    message: 'Not available in the playground: native UDF loading (SONAME) is disabled.',
   },
   {
     pattern: /\bSHUTDOWN\b/i,
@@ -172,6 +179,10 @@ const DENYLIST_RULES: Array<{ pattern: RegExp; message: string }> = [
     pattern: /\bINTO\s+(?:OUTFILE|DUMPFILE)\b/i,
     message:
       'Not available in the playground: writing server files via INTO OUTFILE / DUMPFILE is disabled.',
+  },
+  {
+    pattern: /\bBENCHMARK\s*\(/i,
+    message: 'Not available in the playground: BENCHMARK() is disabled.',
   },
 ];
 
@@ -282,16 +293,7 @@ export class ExecEngine {
     const ws = this.workspaceManager.getWorkspace(wsId);
     this.workspaceManager.touchWorkspace(ws);
 
-    const session = await this.workspaceManager.getOrCreateSession(ws, req.session);
-    if (session.busy) {
-      throw new ApiError(
-        409,
-        'SESSION_BUSY',
-        `Session ${req.session} is already executing a statement`,
-      );
-    }
-
-    session.busy = true;
+    const session = await this.workspaceManager.acquireSession(ws, req.session);
     let connectionBroken = false;
     const results: StatementResult[] = [];
     let responseBytes = 0;
@@ -437,8 +439,7 @@ export class ExecEngine {
 
       return { results, txOpen };
     } finally {
-      session.busy = false;
-      session.lastUsedAt = Date.now();
+      this.workspaceManager.releaseSession(ws, req.session, session);
       if (connectionBroken) {
         delete ws.sessions[req.session];
         await session.conn.end().catch(() => {

@@ -4,12 +4,14 @@ import type { ApiErrorResponse } from '@sql-scratchpad/shared';
 export class ApiError extends Error {
   readonly statusCode: number;
   readonly code: string;
+  readonly retryAfterSec?: number;
 
-  constructor(statusCode: number, code: string, message: string) {
+  constructor(statusCode: number, code: string, message: string, retryAfterSec?: number) {
     super(message);
     this.name = 'ApiError';
     this.statusCode = statusCode;
     this.code = code;
+    this.retryAfterSec = retryAfterSec;
   }
 }
 
@@ -23,6 +25,9 @@ export function fastifyErrorHandler(
   reply: FastifyReply,
 ): void {
   if (err instanceof ApiError) {
+    if (err.retryAfterSec !== undefined) {
+      void reply.header('Retry-After', String(err.retryAfterSec));
+    }
     void reply.code(err.statusCode).send(formatApiError(err.code, err.message));
     return;
   }

@@ -19,8 +19,8 @@ import type {
   SchemaTree,
   SessionId,
 } from '@sql-scratchpad/shared';
-import type { AppConfig } from './config.js';
-import { buildLoggerOptions, sqlLogMeta } from './logger.js';
+import { parseIpAllowList, parseTrustProxy, type AppConfig } from './config.js';
+import { IpHasher, buildLoggerOptions, sqlLogMeta } from './logger.js';
 import { checkDbHealth, createAdminPool } from './db.js';
 import { loadDatasets } from './datasets.js';
 import { fastifyErrorHandler, formatApiError } from './errors.js';
@@ -53,6 +53,8 @@ export interface BuildAppOptions {
   startJanitor?: boolean;
   cleanupOrphansOnBoot?: boolean;
   staticDir?: string;
+  ipHasher?: IpHasher;
+  logStream?: NodeJS.WritableStream;
 }
 
 export interface AppContext {
@@ -62,6 +64,7 @@ export interface AppContext {
   workspaceManager: WorkspaceManager;
   execEngine: ExecEngine;
   importEngine: ImportEngine;
+  ipHasher: IpHasher;
 }
 
 const datasetBodySchema = {
@@ -117,14 +120,33 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
   const adminPool = options.adminPool ?? createAdminPool(config);
   const datasets = options.datasets ?? loadDatasets();
   const rateLimitEnabled = options.enableRateLimit !== false;
+  const ipHasher = options.ipHasher ?? new IpHasher();
+  const loadtestAllowIps = parseIpAllowList(config.LOADTEST_ALLOW_IPS);
 
   const app = Fastify({
-    logger: buildLoggerOptions(config.LOG_LEVEL),
+    logger: buildLoggerOptions(config.LOG_LEVEL, ipHasher, options.logStream),
     bodyLimit: BODY_LIMIT_BYTES,
-    trustProxy: config.TRUST_PROXY ? config.TRUST_PROXY : false,
+    trustProxy: parseTrustProxy(config.TRUST_PROXY),
   });
 
   app.setErrorHandler(fastifyErrorHandler);
+
+  if (config.MAINTENANCE) {
+    app.addHook('onRequest', async (req, reply) => {
+      const pathOnly = req.url.split('?')[0] ?? '/';
+      if ((pathOnly === '/api' || pathOnly.startsWith('/api/')) && pathOnly !== '/api/health') {
+        return reply
+          .code(503)
+          .send(
+            formatApiError(
+              'MAINTENANCE',
+              'SQL Scratchpad is temporarily down for maintenance. Please try again shortly.',
+            ),
+          );
+      }
+    });
+  }
+
   const staticDir = options.staticDir ?? resolve(__dirname, '..', '..', 'web', 'dist');
   const staticRegistered = registerStaticSpa(app, staticDir);
   if (!staticRegistered) {
@@ -136,6 +158,19 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
   if (rateLimitEnabled) {
     await app.register(rateLimit, {
       global: false,
+      keyGenerator: (req) => ipHasher.hash(req.ip || 'unknown'),
+      allowList: (req) => loadtestAllowIps.has(req.ip),
+      addHeadersOnExceeding: {
+        'x-ratelimit-limit': true,
+        'x-ratelimit-remaining': true,
+        'x-ratelimit-reset': true,
+      },
+      addHeaders: {
+        'x-ratelimit-limit': true,
+        'x-ratelimit-remaining': true,
+        'x-ratelimit-reset': true,
+        'retry-after': true,
+      },
       errorResponseBuilder: (_req, context) => ({
         statusCode: 429,
         error: {
@@ -160,6 +195,14 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
 
   app.get('/api/health', async (_req, reply) => {
     const dbOk = await checkDbHealth(adminPool);
+    if (config.MAINTENANCE) {
+      const body: HealthResponse = {
+        status: 'maintenance',
+        db: dbOk ? 'ok' : 'error',
+        version: PKG_VERSION,
+      };
+      return reply.code(200).send(body);
+    }
     const body: HealthResponse = {
       status: dbOk ? 'ok' : 'degraded',
       db: dbOk ? 'ok' : 'error',
@@ -181,7 +224,13 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
         : undefined,
     },
     async (req, reply): Promise<CreateWorkspaceResponse> => {
-      const created = await workspaceManager.createWorkspace(req.body.dataset);
+      const ownerIpHash = ipHasher.hash(req.ip || 'unknown');
+      const bypassPerIp = loadtestAllowIps.has(req.ip);
+      const created = await workspaceManager.createWorkspace(
+        req.body.dataset,
+        ownerIpHash,
+        bypassPerIp,
+      );
       void reply.code(201);
       return created;
     },
@@ -233,8 +282,11 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
         : undefined,
       preHandler: rateLimitEnabled
         ? async (req, reply) => {
+            if (loadtestAllowIps.has(req.ip)) {
+              return;
+            }
             const bytes = Buffer.byteLength(req.body.sql, 'utf8');
-            const decision = importByteBudget.consume(req.ip, bytes);
+            const decision = importByteBudget.consume(ipHasher.hash(req.ip || 'unknown'), bytes);
             if (!decision.allowed) {
               void reply.header('Retry-After', String(decision.retryAfterSec));
               const budgetMb = Math.round(config.IMPORT_BYTE_BUDGET_PER_HOUR / (1024 * 1024));
@@ -271,6 +323,9 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     '/api/workspaces/:wsId/schema',
     {
       schema: { params: wsIdParamsSchema },
+      config: rateLimitEnabled
+        ? { rateLimit: { max: 120, timeWindow: '1 minute' } }
+        : undefined,
     },
     async (req): Promise<SchemaTree> => {
       const ws = workspaceManager.getWorkspace(req.params.wsId);
@@ -308,5 +363,5 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     }
   });
 
-  return { app, adminPool, datasets, workspaceManager, execEngine, importEngine };
+  return { app, adminPool, datasets, workspaceManager, execEngine, importEngine, ipHasher };
 }

@@ -71,15 +71,19 @@ SQL Scratchpad runs as two Docker containers built directly from this repository
 | `DB_PORT` | `3306` | MariaDB service port. |
 | `HOST` | `0.0.0.0` | Listen address inside the app container. |
 | `PORT` | `5050` | Listen port inside the app container. |
-| `TRUST_PROXY` | *(empty)* | Set to your reverse proxy IP/CIDR (e.g. `127.0.0.1`) when behind nginx/Caddy so per-IP rate limits use the real client IP. Leave empty when accessed directly. |
-| `LOG_LEVEL` | `info` | Pino log level (`fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`). |
-| `WORKSPACE_TTL_MS` | `86400000` | Idle workspace TTL in ms (set `7200000` for 2 hours on public instances). |
-| `SESSION_IDLE_TTL_MS` | `900000` | Idle pinned session timeout in ms (15 min default; rolls back open transactions). |
-| `MAX_WORKSPACES` | `50` | Maximum concurrent live workspaces before returning HTTP `503`. |
+| `TRUST_PROXY` | *(empty)* | Comma-separated IP/CIDR list of trusted reverse proxies (e.g. `127.0.0.1`). Forwarded headers are ignored completely when empty. |
+| `LOG_LEVEL` | `info` | Pino log level (`fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`). Client IPs are logged only as daily-salted SHA-256 hashes. |
+| `WORKSPACE_TTL_MS` | `7200000` | Idle workspace TTL in ms (default **2 hours**). |
+| `WORKSPACE_MAX_TTL_MS` | `43200000` | Absolute maximum workspace lifetime in ms (default **12 hours**). |
+| `SESSION_IDLE_TTL_MS` | `600000` | Idle pinned session timeout in ms (default **10 minutes**; rolls back open transactions). |
+| `JANITOR_INTERVAL_MS` | `300000` | Background janitor sweep interval in ms (default **5 minutes**). |
+| `MAX_WORKSPACES` | `50` | Maximum concurrent live workspaces globally before returning HTTP `503`. |
+| `MAX_WORKSPACES_PER_IP` | `3` | Maximum concurrent live workspaces per client IP before returning HTTP `429` with `Retry-After`. |
 | `MAX_WORKSPACE_BYTES` | `52428800` | Per-workspace disk cap in bytes (50 MB). |
 | `IMPORT_TIMEOUT_MS` | `90000` | Wall-clock cap for `POST /api/workspaces/:wsId/import` (90 s). |
 | `IMPORT_MAX_STATEMENTS` | `60000` | Maximum statements per imported `.sql` file. |
 | `IMPORT_BYTE_BUDGET_PER_HOUR` | `31457280` | Per-IP rolling hourly import byte budget (30 MB). |
+| `MAINTENANCE` | `0` | Set to `1` to enable maintenance mode: all `/api/*` routes except `/api/health` return `503`, `/api/health` returns `{"status":"maintenance"}`, and the static UI displays a maintenance banner. |
 
 ## Placing Behind a Reverse Proxy
 
@@ -107,3 +111,8 @@ By default, `deploy/docker-compose.yml` binds `127.0.0.1:5050`. When exposing SQ
   ```
 
   Workspaces are ephemeral by design, so no database backup is needed.
+
+## Maintenance Kill Switch
+
+- **Soft kill switch (keeps static UI online with a maintenance banner):** set `MAINTENANCE=1` in `deploy/app.env` and recreate the app container (`docker compose -f deploy/docker-compose.yml up -d app`). All `/api/*` endpoints except `/api/health` return HTTP `503`, and `/api/health` reports `{"status":"maintenance",...}`.
+- **Hard stop:** `docker compose -f deploy/docker-compose.yml stop app`.

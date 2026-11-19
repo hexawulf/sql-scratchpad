@@ -67,13 +67,13 @@ Template databases (`tpl_*`) are seeded once during container initialization. Cl
 
 | Method & Path | Limit | Purpose |
 |---|---|---|
-| `GET /api/health` | — | Health check (`{"status":"ok","db":"ok","version":...}`) |
+| `GET /api/health` | — | Health check (`{"status":"ok"\|"degraded"\|"maintenance","db":"ok"\|"error","version":...}`) |
 | `GET /api/datasets` | — | Available built-in datasets (`sample-library`, `empty`) |
-| `POST /api/workspaces` | 10/h per IP | Create an isolated workspace from a dataset |
+| `POST /api/workspaces` | 3 live/IP, 10/h per IP, 50 global | Create an isolated workspace from a dataset |
 | `POST /api/workspaces/:wsId/reset` | — | Reset workspace to a dataset |
 | `POST /api/workspaces/:wsId/exec` | 256 KB, 60/min per IP | Execute SQL on pinned session A or B |
 | `POST /api/workspaces/:wsId/import` | 6 MB, 20/h & 30 MB/h per IP | Bulk-import a `.sql` script into the workspace |
-| `GET /api/workspaces/:wsId/schema` | — | Introspect tables, columns, indexes, FKs, triggers, views |
+| `GET /api/workspaces/:wsId/schema` | 120/min per IP | Introspect tables, columns, indexes, FKs, triggers, views |
 | `POST /api/workspaces/:wsId/sessions/:session/kill` | — | `KILL QUERY` on a running statement |
 | `DELETE /api/workspaces/:wsId` | — | Drop workspace database and user |
 
@@ -81,6 +81,6 @@ Template databases (`tpl_*`) are seeded once during container initialization. Cl
 
 A periodic background sweep (every 5 minutes by default):
 
-1. Expires workspaces past their idle TTL.
-2. Closes idle pinned sessions (rolling back any open transaction first).
+1. Expires workspaces past their idle TTL (**2 h** default) or absolute max lifetime (**12 h** default).
+2. Closes idle pinned sessions (**10 min** default), rolling back any open transaction first.
 3. Resets any workspace whose `information_schema.TABLES` size exceeds the 50 MB cap.

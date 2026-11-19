@@ -66,6 +66,10 @@ jobs:
             GRANT SELECT (User, Host) ON mysql.user TO 'scratchpad_admin'@'%';
             FLUSH PRIVILEGES;
             CREATE DATABASE IF NOT EXISTS tpl_sample_library CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            SET GLOBAL max_connections = 150;
+            SET GLOBAL max_allowed_packet = 4194304;
+            SET GLOBAL local_infile = 0;
+            SET GLOBAL max_recursive_iterations = 1000;
           "
           mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u root tpl_sample_library < seeds/sample-library.sql
 
@@ -133,6 +137,10 @@ jobs:
             GRANT SELECT (User, Host) ON mysql.user TO 'scratchpad_admin'@'%';
             FLUSH PRIVILEGES;
             CREATE DATABASE IF NOT EXISTS tpl_sample_library CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            SET GLOBAL max_connections = 150;
+            SET GLOBAL max_allowed_packet = 4194304;
+            SET GLOBAL local_infile = 0;
+            SET GLOBAL max_recursive_iterations = 1000;
           "
           mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u root tpl_sample_library < seeds/sample-library.sql
 

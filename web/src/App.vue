@@ -107,6 +107,7 @@ const running = ref(false);
 const txOpen = ref(false);
 const errorLine = ref<number | null>(null);
 const bannerNotice = ref<string | null>(null);
+const maintenanceMode = ref(false);
 
 const lastResults = ref<StatementResult[]>([]);
 const selectedResultIdx = ref<number>(0);
@@ -186,6 +187,22 @@ async function refreshSchema(allowAutoRecreate = true): Promise<void> {
 }
 
 async function bootstrap(): Promise<void> {
+  try {
+    const health = await adapter.fetchHealth();
+    if (health.status === 'maintenance') {
+      maintenanceMode.value = true;
+      pushStatus(
+        formatNoticeLine(
+          'SQL Scratchpad is currently in maintenance mode. Please try again shortly.',
+          'error',
+        ),
+      );
+      return;
+    }
+  } catch {
+    // Health check failure falls through to normal dataset/workspace error handling
+  }
+
   try {
     datasets.value = await adapter.fetchDatasets();
     if (
@@ -767,6 +784,18 @@ onMounted(() => {
       </div>
     </header>
 
+    <div
+      v-if="maintenanceMode"
+      class="maintenance-banner"
+      role="alert"
+      data-testid="maintenance-banner"
+    >
+      <span>
+        SQL Scratchpad is temporarily down for maintenance. Your tabs and query history remain saved
+        in this browser.
+      </span>
+    </div>
+
     <div v-if="bannerNotice" class="notice-banner" role="status" data-testid="expired-banner">
       <span>{{ bannerNotice }}</span>
       <button type="button" class="banner-close" @click="bannerNotice = null">×</button>
@@ -1121,6 +1150,18 @@ onMounted(() => {
   background: var(--warning-bg);
   color: var(--warning);
   font-size: 12px;
+  font-weight: 600;
+}
+
+.maintenance-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--error-bg, #fee2e2);
+  color: var(--error, #991b1b);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
   font-weight: 600;
 }
 

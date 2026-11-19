@@ -100,7 +100,7 @@ export interface EngineAdapter {
 }
 
 export interface HealthResponse {
-  status: 'ok' | 'degraded';
+  status: 'ok' | 'degraded' | 'maintenance';
   db: 'ok' | 'error';
   version: string;
 }

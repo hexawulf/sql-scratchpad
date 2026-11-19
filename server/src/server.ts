@@ -36,7 +36,11 @@ async function main(): Promise<void> {
     void shutdown('SIGTERM');
   });
 
-  await app.listen({ host: config.HOST, port: config.PORT });
+  await app.listen({
+    host: config.HOST,
+    port: config.PORT,
+    listenTextResolver: () => `SQL Scratchpad HTTP server listening on port ${config.PORT}`,
+  });
 }
 
 main().catch((err) => {

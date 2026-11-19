@@ -110,7 +110,10 @@ export interface WorkspaceEntry {
   createdAt: number;
   lastActiveAt: number;
   expiresAt: number;
+  absoluteExpiresAt: number;
+  ownerIpHash?: string;
   sessions: Partial<Record<SessionId, PinnedSession>>;
+  sessionLocks: Partial<Record<SessionId, boolean>>;
 }
 
 interface TableNameRow extends RowDataPacket {
@@ -167,7 +170,8 @@ export class WorkspaceManager {
     if (!ws) {
       throw new ApiError(404, 'WORKSPACE_NOT_FOUND', 'Workspace not found or expired');
     }
-    if (Date.now() >= ws.expiresAt) {
+    const now = Date.now();
+    if (now >= ws.expiresAt || now >= ws.absoluteExpiresAt) {
       void this.deleteWorkspace(wsId).catch(() => {});
       throw new ApiError(404, 'WORKSPACE_EXPIRED', 'Workspace expired');
     }
@@ -177,7 +181,7 @@ export class WorkspaceManager {
   touchWorkspace(ws: WorkspaceEntry): void {
     const now = Date.now();
     ws.lastActiveAt = now;
-    ws.expiresAt = now + this.config.WORKSPACE_TTL_MS;
+    ws.expiresAt = Math.min(now + this.config.WORKSPACE_TTL_MS, ws.absoluteExpiresAt);
   }
 
   private assertValidDataset(datasetId: string): DatasetMeta {
@@ -195,18 +199,56 @@ export class WorkspaceManager {
     return ds;
   }
 
-  async createWorkspace(datasetId: string): Promise<{
+  async createWorkspace(
+    datasetId: string,
+    ownerIpHash?: string,
+    bypassPerIpLimit = false,
+  ): Promise<{
     wsId: string;
     database: string;
     expiresAt: string;
   }> {
     this.assertValidDataset(datasetId);
 
+    const now = Date.now();
+
+    // Evict any already-expired workspaces lazily before checking caps
+    for (const [expiredId, existing] of [...this.workspaces.entries()]) {
+      if (now >= existing.expiresAt || now >= existing.absoluteExpiresAt) {
+        await this.deleteWorkspace(expiredId).catch(() => {});
+      }
+    }
+
+    if (ownerIpHash && !bypassPerIpLimit) {
+      let ownedCount = 0;
+      let earliestExpiresAt = Infinity;
+      for (const existing of this.workspaces.values()) {
+        if (existing.ownerIpHash === ownerIpHash) {
+          ownedCount += 1;
+          if (existing.expiresAt < earliestExpiresAt) {
+            earliestExpiresAt = existing.expiresAt;
+          }
+        }
+      }
+      if (ownedCount >= this.config.MAX_WORKSPACES_PER_IP) {
+        const retryAfterSec = Math.max(
+          1,
+          Math.ceil((Math.min(earliestExpiresAt, now + this.config.WORKSPACE_TTL_MS) - now) / 1000),
+        );
+        throw new ApiError(
+          429,
+          'PER_IP_WORKSPACE_LIMIT',
+          `You have reached the maximum of ${this.config.MAX_WORKSPACES_PER_IP} active workspaces per IP. Close a workspace or wait for it to expire.`,
+          retryAfterSec,
+        );
+      }
+    }
+
     if (this.workspaces.size >= this.config.MAX_WORKSPACES) {
       throw new ApiError(
         503,
         'WORKSPACE_LIMIT_REACHED',
-        `Maximum live workspaces (${this.config.MAX_WORKSPACES}) reached`,
+        'SQL Scratchpad is busy, try again in a few minutes',
       );
     }
 
@@ -223,7 +265,6 @@ export class WorkspaceManager {
     const database = randomWorkspaceDbName();
     const dbUser = database;
     const password = randomBytes(32).toString('base64url');
-    const now = Date.now();
 
     try {
       await this.provisionDbAndUser(database, dbUser, password);
@@ -237,6 +278,7 @@ export class WorkspaceManager {
       throw err;
     }
 
+    const absoluteExpiresAt = now + this.config.WORKSPACE_MAX_TTL_MS;
     const entry: WorkspaceEntry = {
       wsId,
       database,
@@ -245,8 +287,11 @@ export class WorkspaceManager {
       dataset: datasetId,
       createdAt: now,
       lastActiveAt: now,
-      expiresAt: now + this.config.WORKSPACE_TTL_MS,
+      expiresAt: Math.min(now + this.config.WORKSPACE_TTL_MS, absoluteExpiresAt),
+      absoluteExpiresAt,
+      ownerIpHash,
       sessions: {},
+      sessionLocks: {},
     };
     this.workspaces.set(wsId, entry);
 
@@ -285,6 +330,33 @@ export class WorkspaceManager {
     this.workspaces.delete(wsId);
     await this.closeAllSessions(ws);
     await this.dropDbAndUser(ws.database, ws.dbUser);
+  }
+
+  async acquireSession(ws: WorkspaceEntry, sessionId: SessionId): Promise<PinnedSession> {
+    if (ws.sessionLocks[sessionId] || ws.sessions[sessionId]?.busy) {
+      throw new ApiError(
+        409,
+        'SESSION_BUSY',
+        `Session ${sessionId} is already executing a statement`,
+      );
+    }
+    ws.sessionLocks[sessionId] = true;
+    try {
+      const session = await this.getOrCreateSession(ws, sessionId);
+      session.busy = true;
+      return session;
+    } catch (err) {
+      ws.sessionLocks[sessionId] = false;
+      throw err;
+    }
+  }
+
+  releaseSession(ws: WorkspaceEntry, sessionId: SessionId, session?: PinnedSession): void {
+    if (session) {
+      session.busy = false;
+      session.lastUsedAt = Date.now();
+    }
+    ws.sessionLocks[sessionId] = false;
   }
 
   async getOrCreateSession(ws: WorkspaceEntry, sessionId: SessionId): Promise<PinnedSession> {
@@ -436,10 +508,11 @@ export class WorkspaceManager {
     let closedIdleSessions = 0;
     let truncatedWorkspaces = 0;
 
-    // 1. Idle workspace TTL (24 h)
+    // 1. Workspace idle TTL (2 h) and absolute max TTL (12 h)
     for (const [wsId, ws] of [...this.workspaces.entries()]) {
-      if (now >= ws.expiresAt) {
-        this.logger.info({ wsId, database: ws.database }, 'Expiring idle workspace');
+      if (now >= ws.expiresAt || now >= ws.absoluteExpiresAt) {
+        const reason = now >= ws.absoluteExpiresAt ? 'absolute_ttl' : 'idle_ttl';
+        this.logger.info({ wsId, database: ws.database, reason }, 'Expiring workspace');
         await this.deleteWorkspace(wsId).catch((err) => {
           this.logger.warn({ err, wsId }, 'Failed to expire workspace');
         });
@@ -447,7 +520,7 @@ export class WorkspaceManager {
       }
     }
 
-    // 2. Idle session timeout (15 min) with open-tx rollback
+    // 2. Idle session timeout (10 min) with open-tx rollback
     for (const ws of this.workspaces.values()) {
       for (const sid of ['A', 'B'] as const) {
         const session = ws.sessions[sid];

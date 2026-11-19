@@ -368,16 +368,7 @@ export class ImportEngine {
     }
 
     // Always run on the workspace's own user & connection — never adminPool
-    const session = await this.workspaceManager.getOrCreateSession(ws, 'A');
-    if (session.busy) {
-      throw new ApiError(
-        409,
-        'SESSION_BUSY',
-        'Session A is currently busy; wait for the running query to finish before importing.',
-      );
-    }
-
-    session.busy = true;
+    const session = await this.workspaceManager.acquireSession(ws, 'A');
     let connectionBroken = false;
     let batchedAutocommit = false;
     let prevAutocommit = 1;
@@ -586,8 +577,7 @@ export class ImportEngine {
           connectionBroken = true;
         }
       }
-      session.busy = false;
-      session.lastUsedAt = Date.now();
+      this.workspaceManager.releaseSession(ws, 'A', session);
       this.workspaceManager.touchWorkspace(ws);
       if (connectionBroken) {
         delete ws.sessions.A;

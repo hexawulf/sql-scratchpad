@@ -9,9 +9,9 @@ function readAppVersion(): string {
     const pkg = JSON.parse(
       readFileSync(resolve(import.meta.dirname, '..', 'package.json'), 'utf8'),
     ) as { version?: string };
-    return pkg.version ?? '0.3.1';
+    return pkg.version ?? '0.3.2';
   } catch {
-    return '0.3.1';
+    return '0.3.2';
   }
 }
 

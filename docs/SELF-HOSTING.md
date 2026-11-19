@@ -48,7 +48,7 @@ SQL Scratchpad runs as two Docker containers built directly from this repository
 
    ```bash
    curl -s http://127.0.0.1:5050/api/health
-   # Expected: {"status":"ok","db":"ok","version":"0.3.1"}
+   # Expected: {"status":"ok","db":"ok","version":"0.3.2"}
    ```
 
    Open `http://127.0.0.1:5050` in your browser.

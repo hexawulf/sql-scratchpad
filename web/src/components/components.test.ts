@@ -146,7 +146,7 @@ describe('Vue components', () => {
     expect(wrapper.text()).toContain(
       'SQL Scratchpad — a Letos-style SQL playground (MariaDB + SQLite)',
     );
-    expect(wrapper.get('[data-testid="about-version"]').text()).toContain('Version 0.3.1 · build testsha');
+    expect(wrapper.get('[data-testid="about-version"]').text()).toContain('Version 0.3.2 · build testsha');
     expect(wrapper.text()).toContain('Erling Wulf Weinreich (0xWulf)');
     expect(wrapper.text()).toContain('MariaDB, sql.js (SQLite), Vue 3, CodeMirror 6, Fastify');
     expect(wrapper.text()).toContain('Not affiliated with any university.');

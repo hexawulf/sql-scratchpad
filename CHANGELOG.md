@@ -2,6 +2,29 @@
 
 All notable changes to SQL Scratchpad are documented in this file.
 
+## [0.3.2] - 2026-11-20
+
+### Security
+
+- **Per-IP live-workspace cap (`MAX_WORKSPACES_PER_IP`):** raised default from `3` to `6` (env-configurable; global cap stays `50`) to accommodate multiple users behind shared IPv4 / CGNAT and campus/office NAT while keeping per-key usage bounded.
+- **Workspace create rate limit (`POST /api/workspaces`):** raised from `10/h` to `20/h` per client key (preserving the ~3.3× ratio to the live workspace cap) so shared-IPv4/CGNAT reloads with `pagehide` teardown and the full default-cap E2E suite do not trip `RATE_LIMITED`.
+- **Ownership-checked beacon close (`POST /api/workspaces/:wsId/close`):** shares `DELETE` teardown semantics and `60/min` per-key rate limit, and verifies caller IP-key ownership (`403 FORBIDDEN` for non-owners) because `navigator.sendBeacon` uses CORS simple requests.
+
+### Added
+
+- **Best-effort workspace release on `pagehide`:** browser tabs now send `navigator.sendBeacon` to `POST /api/workspaces/:wsId/close` on `pagehide` to free live workspace slots promptly.
+- **Visible `429`/`503` error UX:** rate-limit and capacity responses from create, reset, exec, and import now render the server message plus `"try again in N minute(s)"` (computed from `Retry-After`) in a dismissible alert banner, the status log, and the schema tree pane (never silently falling back to `"No workspace connected."`).
+- **E2E cap-limit regression test:** added an end-to-end Playwright test that fills the default per-IP live workspace cap and asserts the visible `429` banner, status log, and schema error.
+
+### Fixed
+
+- **Single-workspace reuse per browser tab:** serialized initial workspace bootstrap against user actions so picking **Sample: Library**, **Empty DB**, a dataset from the dropdown, or **Import (fresh)** always resets the active workspace (`POST /reset`) instead of creating extra workspaces; a new workspace is created only if none exists or the server returns `404`.
+- **E2E workspace hygiene & CI reliability:** every Playwright test now cleans up its workspaces in `afterEach`, and E2E runs with `workers: 1` against the default cap.
+
+### Changed
+
+- **GitHub Actions:** updated `actions/checkout` and `actions/setup-node` from `v4` to `v7` to remove the Node 20 runtime deprecation warning.
+
 ## [0.3.1] - 2026-11-20
 
 ### Security

@@ -2,7 +2,7 @@ export const SOURCE_URL = 'https://github.com/hexawulf/sqlyard';
 
 export const ABOUT_INFO = {
   tagline: 'SQLyard — a Letos-style SQL playground (MariaDB + SQLite)',
-  version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.1.0',
+  version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.2.0',
   gitSha: typeof __GIT_SHA__ !== 'undefined' ? __GIT_SHA__ : 'dev',
   developerName: 'Erling Wulf Weinreich (0xWulf)',
   developerEmail: 'dev@0xwulf.dev',

@@ -1,8 +1,8 @@
-name: sqlyard
+name: sql-scratchpad
 
 services:
   db:
-    image: sqlyard-db:local
+    image: sql-scratchpad-db:local
     build:
       context: ..
       dockerfile: db/Dockerfile
@@ -10,7 +10,7 @@ services:
     env_file:
       - db.env
     volumes:
-      - sqlyard-db:/var/lib/mysql
+      - sql-scratchpad-db:/var/lib/mysql
     networks:
       - internal
     mem_limit: 512m
@@ -30,7 +30,7 @@ services:
       start_period: 45s
 
   app:
-    image: sqlyard:local
+    image: sql-scratchpad:local
     build:
       context: ..
       dockerfile: Dockerfile
@@ -66,4 +66,4 @@ networks:
   edge: {}
 
 volumes:
-  sqlyard-db: {}
+  sql-scratchpad-db: {}

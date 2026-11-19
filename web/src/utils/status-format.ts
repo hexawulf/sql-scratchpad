@@ -1,4 +1,4 @@
-import type { StatementResult } from '@sqlyard/shared';
+import type { StatementResult } from '@sql-scratchpad/shared';
 import type { StatusLogEntry } from '../types/state';
 
 export function formatTimeHHMMSS(date: Date = new Date()): string {

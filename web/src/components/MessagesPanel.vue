@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ImportResponse, StatementResult } from '@sqlyard/shared';
+import type { ImportResponse, StatementResult } from '@sql-scratchpad/shared';
 import { formatDurationSeconds } from '../utils/status-format';
 
 export interface ImportSummaryRecord {

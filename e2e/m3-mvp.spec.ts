@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test.describe('SQLyard public app acceptance flows', () => {
+test.describe('SQL Scratchpad public app acceptance flows', () => {
   test('new user sees empty state, loads Sample: Library, runs SELECT * FROM Books (12 rows)', async ({
     page,
   }) => {
@@ -61,7 +61,7 @@ test.describe('SQLyard public app acceptance flows', () => {
     await expect(page.getByTestId('schema-tree')).toContainText('notes');
   });
 
-  test('reload restores tabs and execution history from sqlyard:v1', async ({ page }) => {
+  test('reload restores tabs and execution history from sql-scratchpad:v1', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('welcome-sample-btn').click();
     await expect(page.getByTestId('schema-tree')).toContainText('Books');

@@ -1,5 +1,5 @@
 import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
-import type { ApiErrorResponse } from '@sqlyard/shared';
+import type { ApiErrorResponse } from '@sql-scratchpad/shared';
 
 export class ApiError extends Error {
   readonly statusCode: number;

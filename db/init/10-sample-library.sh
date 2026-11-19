@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-SEED_FILE="/opt/sqlyard-seeds/sample-library.sql"
+SEED_FILE="/opt/sql-scratchpad-seeds/sample-library.sql"
 
 if [ ! -f "${SEED_FILE}" ]; then
   echo "ERROR: Seed file not found at ${SEED_FILE}" >&2

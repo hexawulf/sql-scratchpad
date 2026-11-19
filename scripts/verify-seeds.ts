@@ -96,17 +96,17 @@ async function verifyMariaDb(seedSql: string): Promise<{
 }> {
   const host = process.env.DB_HOST ?? '127.0.0.1';
   const port = Number(process.env.DB_PORT ?? '3307');
-  const password = process.env.SQLYARD_ADMIN_PASSWORD;
+  const password = process.env.SQLSCRATCHPAD_ADMIN_PASSWORD;
 
   if (!password) {
-    throw new Error('SQLYARD_ADMIN_PASSWORD is not set in environment or .env');
+    throw new Error('SQLSCRATCHPAD_ADMIN_PASSWORD is not set in environment or .env');
   }
 
-  console.log(`=== MariaDB verification (${host}:${port} as sqlyard_admin) ===`);
+  console.log(`=== MariaDB verification (${host}:${port} as scratchpad_admin) ===`);
   const conn = await mysql.createConnection({
     host,
     port,
-    user: 'sqlyard_admin',
+    user: 'scratchpad_admin',
     password,
     multipleStatements: true,
   });

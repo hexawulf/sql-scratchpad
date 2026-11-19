@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
-import type { SchemaTree as SchemaTreeData } from '@sqlyard/shared';
+import type { SchemaTree as SchemaTreeData } from '@sql-scratchpad/shared';
 import StatusLog from './StatusLog.vue';
 import ResultGrid from './ResultGrid.vue';
 import SchemaTree from './SchemaTree.vue';
@@ -142,7 +142,9 @@ describe('Vue components', () => {
       props: { open: true },
     });
 
-    expect(wrapper.text()).toContain('SQLyard — a Letos-style SQL playground (MariaDB + SQLite)');
+    expect(wrapper.text()).toContain(
+      'SQL Scratchpad — a Letos-style SQL playground (MariaDB + SQLite)',
+    );
     expect(wrapper.get('[data-testid="about-version"]').text()).toContain('Version 0.2.0 · build testsha');
     expect(wrapper.text()).toContain('Erling Wulf Weinreich (0xWulf)');
     expect(wrapper.text()).toContain('MariaDB, sql.js (SQLite), Vue 3, CodeMirror 6, Fastify');
@@ -157,13 +159,19 @@ describe('Vue components', () => {
     expect(emailLink.attributes('rel')).toBe('noopener noreferrer');
 
     const sourceLink = wrapper.get('[data-testid="about-source-link"]');
-    expect(sourceLink.attributes('href')).toBe('https://github.com/hexawulf/sqlyard');
+    expect(sourceLink.attributes('href')).toBe('https://github.com/hexawulf/sql-scratchpad');
     expect(sourceLink.attributes('target')).toBe('_blank');
     expect(sourceLink.attributes('rel')).toBe('noopener noreferrer');
 
+    const sisterLink = wrapper.get('[data-testid="about-sister-link"]');
+    expect(sisterLink.text()).toBe('py-scratchpad.com');
+    expect(sisterLink.attributes('href')).toBe('https://py-scratchpad.com');
+    expect(sisterLink.attributes('target')).toBe('_blank');
+    expect(sisterLink.attributes('rel')).toBe('noopener noreferrer');
+
     // Focus trap: Shift+Tab on first focusable wraps to last; Tab on last wraps to first
     const closeBtn = wrapper.get('[data-testid="about-close-btn"]').element as HTMLElement;
-    const lastLink = sourceLink.element as HTMLElement;
+    const lastLink = sisterLink.element as HTMLElement;
     closeBtn.focus();
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, cancelable: true }));
     expect(document.activeElement).toBe(lastLink);

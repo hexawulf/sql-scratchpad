@@ -24,7 +24,7 @@ COPY web ./web
 ARG GIT_SHA=dev
 ENV GIT_SHA=${GIT_SHA}
 
-RUN pnpm --filter @sqlyard/shared build ; pnpm --filter @sqlyard/server build ; pnpm --filter @sqlyard/web build
+RUN pnpm --filter @sql-scratchpad/shared build ; pnpm --filter @sql-scratchpad/server build ; pnpm --filter @sql-scratchpad/web build
 
 FROM base AS prod-deps
 WORKDIR /app
@@ -34,7 +34,7 @@ COPY shared/package.json ./shared/package.json
 COPY server/package.json ./server/package.json
 COPY web/package.json ./web/package.json
 
-RUN pnpm --filter @sqlyard/server... install --frozen-lockfile --prod --ignore-scripts
+RUN pnpm --filter @sql-scratchpad/server... install --frozen-lockfile --prod --ignore-scripts
 
 FROM ${NODE_IMAGE} AS runtime
 WORKDIR /app

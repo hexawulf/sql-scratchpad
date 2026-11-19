@@ -11,7 +11,7 @@ import type {
   ExecResponse,
   StatementResult,
   StatementWarning,
-} from '@sqlyard/shared';
+} from '@sql-scratchpad/shared';
 import type { AppConfig } from './config.js';
 import { ApiError } from './errors.js';
 import type { WorkspaceManager } from './workspace-manager.js';

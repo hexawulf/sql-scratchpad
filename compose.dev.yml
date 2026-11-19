@@ -1,4 +1,4 @@
-name: sqlyard-dev
+name: sql-scratchpad-dev
 
 services:
   db:
@@ -11,7 +11,7 @@ services:
     ports:
       - '127.0.0.1:3307:3306'
     volumes:
-      - sqlyard-dev-db:/var/lib/mysql
+      - sql-scratchpad-dev-db:/var/lib/mysql
     mem_limit: 512m
     cpus: 1.5
     security_opt:
@@ -26,4 +26,4 @@ services:
       start_period: 30s
 
 volumes:
-  sqlyard-dev-db: {}
+  sql-scratchpad-dev-db: {}

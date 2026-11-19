@@ -2,17 +2,17 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security issue in SQLyard, please email **dev@0xwulf.dev** with reproduction steps and impact details instead of opening a public issue. We will acknowledge reports promptly and coordinate a fix before disclosure.
+If you discover a security issue in SQL Scratchpad, please email **dev@0xwulf.dev** with reproduction steps and impact details instead of opening a public issue. We will acknowledge reports promptly and coordinate a fix before disclosure.
 
 ---
 
 ## Threat Model & Controls
 
-SQLyard executes **arbitrary user-supplied SQL** on a real MariaDB 11.4 server. The defense-in-depth controls below are designed around untrusted input:
+SQL Scratchpad executes **arbitrary user-supplied SQL** on a real MariaDB 11.4 server. The defense-in-depth controls below are designed around untrusted input:
 
 | Threat | Control |
 |---|---|
-| Reading or modifying other workspaces or templates | Per-workspace database (`ws_<hex>`) and dedicated MariaDB user granted privileges on that database only. Templates (`tpl_*`) are readable only by `sqlyard_admin`. Integration tests assert cross-workspace and template access fail with MariaDB errno `1142`. |
+| Reading or modifying other workspaces or templates | Per-workspace database (`ws_<hex>`) and dedicated MariaDB user granted privileges on that database only. Templates (`tpl_*`) are readable only by `scratchpad_admin`. Integration tests assert cross-workspace and template access fail with MariaDB errno `1142`. |
 | Reading or writing host files (`LOAD DATA`, `INTO OUTFILE`) | `FILE` privilege is never granted, `local_infile = 0`, `secure_file_priv` points to an empty `0700` directory, and a pre-flight denylist rejects file/admin statements cleanly. |
 | CPU exhaustion (slow queries, recursive CTEs) | `MAX_STATEMENT_TIME = 5` on every workspace account and session, `max_recursive_iterations = 1000`, `KILL QUERY` endpoint, container CPU cap (`cpus: 1.5`), and per-IP rate limits. |
 | Memory exhaustion | Tuned MariaDB buffer settings (`innodb_buffer_pool_size = 96M`, `performance_schema = OFF`), container `mem_limit` (`512m` DB / `192m` app), 1,000-row result cap, and 5 MB response cap. |

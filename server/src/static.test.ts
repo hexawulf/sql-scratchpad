@@ -9,9 +9,12 @@ describe('registerStaticSpa', () => {
   let tempDir: string;
 
   beforeAll(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'sqlyard-static-'));
+    tempDir = mkdtempSync(join(tmpdir(), 'sql-scratchpad-static-'));
     mkdirSync(join(tempDir, 'assets'), { recursive: true });
-    writeFileSync(join(tempDir, 'index.html'), '<!doctype html><html><body>SQLyard</body></html>');
+    writeFileSync(
+      join(tempDir, 'index.html'),
+      '<!doctype html><html><body>SQL Scratchpad</body></html>',
+    );
     writeFileSync(join(tempDir, 'assets', 'app-abc123.js'), 'console.log("ok");');
   });
 
@@ -30,7 +33,7 @@ describe('registerStaticSpa', () => {
     expect(indexRes.headers['cache-control']).toBe('no-cache');
     expect(indexRes.headers['content-security-policy']).toBe(CSP_HEADER);
     expect(indexRes.headers['x-content-type-options']).toBe('nosniff');
-    expect(indexRes.body).toContain('SQLyard');
+    expect(indexRes.body).toContain('SQL Scratchpad');
 
     const assetRes = await app.inject({ method: 'GET', url: '/assets/app-abc123.js' });
     expect(assetRes.statusCode).toBe(200);

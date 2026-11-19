@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { StatementResult } from '@sqlyard/shared';
+import type { StatementResult } from '@sql-scratchpad/shared';
 import {
   containsDdlStatement,
   extractStatementAtCursor,
@@ -122,7 +122,7 @@ describe('export-grid utilities', () => {
 });
 
 describe('storage and session toggle SQL', () => {
-  it('persists and restores sqlyard:v1 state', () => {
+  it('persists and restores sql-scratchpad:v1 state', () => {
     const map = new Map<string, string>();
     const fakeStorage = {
       getItem: (k: string) => map.get(k) ?? null,

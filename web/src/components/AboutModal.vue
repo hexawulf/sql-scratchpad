@@ -100,7 +100,7 @@ onBeforeUnmount(() => {
       data-testid="about-modal"
     >
       <div class="about-header">
-        <h2 id="about-modal-title">About SQLyard</h2>
+        <h2 id="about-modal-title">About SQL Scratchpad</h2>
         <button
           ref="closeBtnRef"
           type="button"
@@ -144,6 +144,19 @@ onBeforeUnmount(() => {
                 data-testid="about-source-link"
               >
                 {{ ABOUT_INFO.sourceUrl }}
+              </a>
+            </dd>
+          </div>
+          <div class="about-row">
+            <dt>Sister project</dt>
+            <dd>
+              <a
+                :href="ABOUT_INFO.sisterProjectUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="about-sister-link"
+              >
+                {{ ABOUT_INFO.sisterProjectName }}
               </a>
             </dd>
           </div>
@@ -252,7 +265,7 @@ onBeforeUnmount(() => {
 
 .about-row {
   display: grid;
-  grid-template-columns: 84px 1fr;
+  grid-template-columns: 100px 1fr;
   gap: 8px;
 }
 

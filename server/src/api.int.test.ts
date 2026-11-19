@@ -3,13 +3,13 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import mysql, { type RowDataPacket } from 'mysql2/promise';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import type { ExecResponse, ImportResponse, SchemaTree } from '@sqlyard/shared';
+import type { ExecResponse, ImportResponse, SchemaTree } from '@sql-scratchpad/shared';
 import { buildApp, loadConfig, type AppContext } from './index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: resolve(__dirname, '..', '..', '.env'), quiet: true });
 
-describe('SQLyard API integration (real MariaDB 11.4)', () => {
+describe('SQL Scratchpad API integration (real MariaDB 11.4)', () => {
   let ctx: AppContext;
   const createdWsIds = new Set<string>();
 
@@ -284,7 +284,7 @@ describe('SQLyard API integration (real MariaDB 11.4)', () => {
     // 2. INTO OUTFILE denied by pre-flight denylist AND by MariaDB itself
     const outfileAttempt = await execSql(
       ws1.wsId,
-      "SELECT * FROM Books INTO OUTFILE '/tmp/sqlyard_blocked.txt';",
+      "SELECT * FROM Books INTO OUTFILE '/tmp/sql_scratchpad_blocked.txt';",
     );
     expect(outfileAttempt.results[0]?.kind).toBe('error');
     expect(outfileAttempt.results[0]?.error?.code).toBe('PLAYGROUND_DENIED');
@@ -299,7 +299,7 @@ describe('SQLyard API integration (real MariaDB 11.4)', () => {
     });
     try {
       await expect(
-        directConn.query("SELECT * FROM Books INTO OUTFILE '/tmp/sqlyard_blocked2.txt'"),
+        directConn.query("SELECT * FROM Books INTO OUTFILE '/tmp/sql_scratchpad_blocked2.txt'"),
       ).rejects.toMatchObject({ errno: 1227 });
     } finally {
       await directConn.end();

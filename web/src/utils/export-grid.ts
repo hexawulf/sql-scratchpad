@@ -1,4 +1,4 @@
-import type { ColumnMeta } from '@sqlyard/shared';
+import type { ColumnMeta } from '@sql-scratchpad/shared';
 
 const NUMERIC_TYPE_RE =
   /^(TINY|SHORT|LONG|LONGLONG|INT|INT24|TINYINT|SMALLINT|MEDIUMINT|BIGINT|DECIMAL|NEWDECIMAL|NUMERIC|FLOAT|DOUBLE|REAL|BIT|YEAR)\b/i;

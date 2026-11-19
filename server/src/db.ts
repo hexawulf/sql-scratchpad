@@ -6,7 +6,7 @@ export function createAdminPool(config: AppConfig): Pool {
     host: config.DB_HOST,
     port: config.DB_PORT,
     user: config.DB_ADMIN_USER,
-    password: config.SQLYARD_ADMIN_PASSWORD,
+    password: config.SQLSCRATCHPAD_ADMIN_PASSWORD,
     connectionLimit: 10,
     waitForConnections: true,
     queueLimit: 0,

@@ -18,7 +18,7 @@ import type {
   ResetWorkspaceResponse,
   SchemaTree,
   SessionId,
-} from '@sqlyard/shared';
+} from '@sql-scratchpad/shared';
 import type { AppConfig } from './config.js';
 import { buildLoggerOptions, sqlLogMeta } from './logger.js';
 import { checkDbHealth, createAdminPool } from './db.js';

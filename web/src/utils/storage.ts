@@ -1,6 +1,6 @@
 import type { AppSettings, IsolationLevel, PersistedStateV1 } from '../types/state';
 
-export const STORAGE_KEY = 'sqlyard:v1';
+export const STORAGE_KEY = 'sql-scratchpad:v1';
 export const MAX_HISTORY_ENTRIES = 200;
 
 export function createDefaultSettings(): AppSettings {

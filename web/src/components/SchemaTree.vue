@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { reactive, ref, watch } from 'vue';
-import type { SchemaTable, SchemaTree } from '@sqlyard/shared';
+import type { SchemaTable, SchemaTree } from '@sql-scratchpad/shared';
 
 const props = defineProps<{
   schema: SchemaTree | null;

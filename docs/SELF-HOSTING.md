@@ -1,9 +1,9 @@
-# Self-Hosting SQLyard
+# Self-Hosting SQL Scratchpad
 
-SQLyard runs as two Docker containers built directly from this repository — no external container registry account is required:
+SQL Scratchpad runs as two Docker containers built directly from this repository — no external container registry account is required:
 
-- **`sqlyard-db:local`** — MariaDB 11.4 LTS with conservative memory settings and the `sample-library` template database.
-- **`sqlyard:local`** — Node 24 Fastify API + prebuilt Vue 3 static SPA.
+- **`sql-scratchpad-db:local`** — MariaDB 11.4 LTS with conservative memory settings and the `sample-library` template database.
+- **`sql-scratchpad:local`** — Node 24 Fastify API + prebuilt Vue 3 static SPA.
 
 ## Resource Requirements
 
@@ -17,8 +17,8 @@ SQLyard runs as two Docker containers built directly from this repository — no
 1. **Clone the repository:**
 
    ```bash
-   git clone https://github.com/hexawulf/sqlyard.git
-   cd sqlyard
+   git clone https://github.com/hexawulf/sql-scratchpad.git
+   cd sql-scratchpad
    ```
 
 2. **Create least-privilege environment files from the examples:**
@@ -33,7 +33,7 @@ SQLyard runs as two Docker containers built directly from this repository — no
 
    ```bash
    openssl rand -base64 32   # use for MARIADB_ROOT_PASSWORD (db.env only)
-   openssl rand -base64 32   # use for SQLYARD_ADMIN_PASSWORD (identical in db.env and app.env)
+   openssl rand -base64 32   # use for SQLSCRATCHPAD_ADMIN_PASSWORD (identical in db.env and app.env)
    ```
 
    Edit `deploy/db.env` and `deploy/app.env` with those generated values. Never place `MARIADB_ROOT_PASSWORD` in `deploy/app.env`.
@@ -60,13 +60,13 @@ SQLyard runs as two Docker containers built directly from this repository — no
 | Variable | Required | Description |
 |---|---|---|
 | `MARIADB_ROOT_PASSWORD` | Yes | MariaDB root password (used only inside the DB container during init). |
-| `SQLYARD_ADMIN_PASSWORD` | Yes | Password for the `sqlyard_admin` account; must match `deploy/app.env`. |
+| `SQLSCRATCHPAD_ADMIN_PASSWORD` | Yes | Password for the `scratchpad_admin` account; must match `deploy/app.env`. |
 
 ### `deploy/app.env`
 
 | Variable | Default | Description |
 |---|---|---|
-| `SQLYARD_ADMIN_PASSWORD` | *(required)* | Admin pool password matching `deploy/db.env`. |
+| `SQLSCRATCHPAD_ADMIN_PASSWORD` | *(required)* | Admin pool password matching `deploy/db.env`. |
 | `DB_HOST` | `db` | MariaDB service hostname on the internal Docker network. |
 | `DB_PORT` | `3306` | MariaDB service port. |
 | `HOST` | `0.0.0.0` | Listen address inside the app container. |
@@ -83,7 +83,7 @@ SQLyard runs as two Docker containers built directly from this repository — no
 
 ## Placing Behind a Reverse Proxy
 
-By default, `deploy/docker-compose.yml` binds `127.0.0.1:5050`. When exposing SQLyard over HTTPS behind nginx or Caddy:
+By default, `deploy/docker-compose.yml` binds `127.0.0.1:5050`. When exposing SQL Scratchpad over HTTPS behind nginx or Caddy:
 
 - Allow bodies up to **7 MB** (`client_max_body_size 7m;` in nginx) so 6 MB `.sql` imports succeed.
 - Set proxy read timeout to at least **120 s** (`proxy_read_timeout 120s;`) for large imports and lock-wait queries.

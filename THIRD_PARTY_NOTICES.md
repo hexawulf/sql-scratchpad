@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-SQLyard bundles and depends on open-source fonts, libraries, and container images.
+SQL Scratchpad bundles and depends on open-source fonts, libraries, and container images.
 
 ## Runtime Libraries
 

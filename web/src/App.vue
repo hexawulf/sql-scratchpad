@@ -8,7 +8,7 @@ import type {
   ImportResponse,
   SchemaTree as SchemaTreeData,
   StatementResult,
-} from '@sqlyard/shared';
+} from '@sql-scratchpad/shared';
 import { MariaDbAdapter, WorkspaceExpiredError } from './engines/mariadb';
 import type {
   AppSettings,
@@ -633,9 +633,9 @@ onMounted(() => {
 <template>
   <div class="app-root">
     <!-- Top Toolbar -->
-    <header class="toolbar" role="toolbar" aria-label="SQLyard toolbar">
+    <header class="toolbar" role="toolbar" aria-label="SQL Scratchpad toolbar">
       <div class="toolbar-group">
-        <span class="brand">SQLyard</span>
+        <span class="brand">SQL Scratchpad</span>
 
         <label class="select-wrap" title="SQL Engine">
           <span class="sr-only">Engine</span>
@@ -724,7 +724,7 @@ onMounted(() => {
         <button
           type="button"
           class="tb-btn"
-          title="About SQLyard"
+          title="About SQL Scratchpad"
           data-testid="about-btn"
           @click="aboutOpen = true"
         >

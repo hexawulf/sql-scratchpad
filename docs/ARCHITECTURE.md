@@ -1,15 +1,15 @@
-# SQLyard Architecture
+# SQL Scratchpad Architecture
 
 ## Overview
 
-SQLyard is a TypeScript monorepo (`pnpm` workspaces) with three packages and a dedicated MariaDB 11.4 database image:
+SQL Scratchpad is a TypeScript monorepo (`pnpm` workspaces) with three packages and a dedicated MariaDB 11.4 database image:
 
 | Directory | Role |
 |---|---|
 | `shared/` | Engine-agnostic TypeScript contracts (`EngineAdapter`, `ExecRequest`, `ExecResponse`, `ImportRequest`, `ImportResponse`, `SchemaTree`, `DatasetMeta`). |
 | `server/` | Fastify 5 HTTP API, static SPA server, workspace manager, execution engine, SQL import engine, schema introspector, and janitor. |
 | `web/` | Vue 3 + Vite + CodeMirror 6 frontend SPA with virtualized result grid, schema tree, import modal, and `localStorage` state persistence. |
-| `db/` | MariaDB 11.4 LTS Dockerfile, conservative memory/safety configuration (`db/conf.d/sqlyard.cnf`), and init scripts (`00-admin-user.sh`, `10-sample-library.sh`). |
+| `db/` | MariaDB 11.4 LTS Dockerfile, conservative memory/safety configuration (`db/conf.d/sql-scratchpad.cnf`), and init scripts (`00-admin-user.sh`, `10-sample-library.sh`). |
 | `seeds/` | Portable sample dataset (`sample-library.sql`) verified identically on MariaDB 11.4 and SQLite (`sql.js`). |
 
 ```mermaid
@@ -21,8 +21,8 @@ flowchart LR
     end
 
     subgraph Containers [Docker Compose]
-        API[sqlyard app<br/>Fastify 5 · static SPA<br/>127.0.0.1:5050]
-        DB[(sqlyard-db<br/>MariaDB 11.4<br/>internal network only)]
+        API[sql-scratchpad app<br/>Fastify 5 · static SPA<br/>127.0.0.1:5050]
+        DB[(sql-scratchpad-db<br/>MariaDB 11.4<br/>internal network only)]
         API -- admin pool<br/>provision · janitor --> DB
         API -- pinned per-workspace<br/>connections A/B --> DB
     end
@@ -32,7 +32,7 @@ flowchart LR
 
 ## Workspace Isolation
 
-SQLyard relies on MariaDB's own privilege system rather than regex sandboxing:
+SQL Scratchpad relies on MariaDB's own privilege system rather than regex sandboxing:
 
 1. Creating a workspace provisions a fresh database (`ws_<12 hex>`) and a dedicated database user with a 32-byte random password kept only in API process memory.
 2. The workspace user receives table/view/trigger/routine privileges **only** on its own `ws_<hex>.*` schema — never global privileges (`FILE`, `SUPER`, `PROCESS`, `CREATE USER`, `GRANT OPTION`, or access to `tpl_*` templates or other `ws_*` workspaces).

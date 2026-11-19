@@ -11,7 +11,7 @@ import type {
   ResetWorkspaceResponse,
   SchemaTree,
   SessionId,
-} from '@sqlyard/shared';
+} from '@sql-scratchpad/shared';
 
 export class ApiHttpError extends Error {
   readonly status: number;

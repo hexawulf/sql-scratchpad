@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import mysql, { type Connection, type Pool, type PoolConnection, type RowDataPacket } from 'mysql2/promise';
 import type { FastifyBaseLogger } from 'fastify';
-import type { DatasetMeta, SessionId } from '@sqlyard/shared';
+import type { DatasetMeta, SessionId } from '@sql-scratchpad/shared';
 import type { AppConfig } from './config.js';
 import { ApiError } from './errors.js';
 

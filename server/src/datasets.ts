@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import type { DatasetMeta } from '@sqlyard/shared';
+import type { DatasetMeta } from '@sql-scratchpad/shared';
 
 const DatasetSchema = z.object({
   id: z.string().regex(/^[a-z0-9_-]+$/),

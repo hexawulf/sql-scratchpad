@@ -1,4 +1,4 @@
--- SQLyard Sample Dataset: sample-library
+-- SQL Scratchpad Sample Dataset: sample-library
 -- Portable SQL for MariaDB 11.4 and SQLite 3 (MIT License)
 -- Schema: Authors, Books, BookAuthors (N:M), Members (nullable self-FK), Loans (DATE, DECIMAL)
 --

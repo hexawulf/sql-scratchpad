@@ -8,7 +8,7 @@ export const PINO_REDACT_PATHS = [
   'body.sql',
   'password',
   '*.password',
-  'SQLYARD_ADMIN_PASSWORD',
+  'SQLSCRATCHPAD_ADMIN_PASSWORD',
   'MARIADB_ROOT_PASSWORD',
   'req.headers.authorization',
   'req.headers.cookie',

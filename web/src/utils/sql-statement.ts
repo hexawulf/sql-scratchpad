@@ -1,4 +1,4 @@
-import type { StatementResult } from '@sqlyard/shared';
+import type { StatementResult } from '@sql-scratchpad/shared';
 
 export interface ExtractedStatement {
   sql: string;

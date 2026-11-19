@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import type { ImportMode } from '@sqlyard/shared';
+import type { ImportMode } from '@sql-scratchpad/shared';
 
 const MAX_IMPORT_BYTES = 6 * 1024 * 1024;
 

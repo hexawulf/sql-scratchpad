@@ -1,4 +1,4 @@
-import type { EngineId } from '@sqlyard/shared';
+import type { EngineId } from '@sql-scratchpad/shared';
 
 export type IsolationLevel =
   | 'READ UNCOMMITTED'

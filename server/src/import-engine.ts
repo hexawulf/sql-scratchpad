@@ -5,7 +5,7 @@ import type {
   ImportResponse,
   ImportRewrittenStatement,
   ImportSkippedStatement,
-} from '@sqlyard/shared';
+} from '@sql-scratchpad/shared';
 import type { AppConfig } from './config.js';
 import { ApiError } from './errors.js';
 import {

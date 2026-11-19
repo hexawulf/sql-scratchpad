@@ -6,7 +6,7 @@ import type {
   SchemaTable,
   SchemaTree,
   SchemaView,
-} from '@sqlyard/shared';
+} from '@sql-scratchpad/shared';
 
 interface BaseTableRow extends RowDataPacket {
   TABLE_NAME: string;

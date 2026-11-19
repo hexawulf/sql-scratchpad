@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useVirtualizer } from '@tanstack/vue-virtual';
-import type { ColumnMeta } from '@sqlyard/shared';
+import type { ColumnMeta } from '@sql-scratchpad/shared';
 import {
   formatCellText,
   isNumericColumnType,

@@ -27,7 +27,7 @@ import { MySQL, sql, type SQLNamespace } from '@codemirror/lang-sql';
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
 import { format as formatSql } from 'sql-formatter';
-import type { SchemaTree } from '@sqlyard/shared';
+import type { SchemaTree } from '@sql-scratchpad/shared';
 import { extractStatementAtCursor } from '../utils/sql-statement';
 
 const props = defineProps<{

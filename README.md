@@ -1,8 +1,11 @@
-# SQL-Scratchpad
+# SQL Scratchpad
 
 A lightweight, Letos-style SQL playground in the browser backed by real **MariaDB 11.4 LTS** isolated workspaces.
 
-![SQLyard workspace screenshot](docs/screenshot.png)
+- **Web app:** https://sql-scratchpad.com *(coming soon)*
+- **Source:** https://github.com/hexawulf/sql-scratchpad
+
+![SQL Scratchpad workspace screenshot](docs/screenshot.png)
 
 ## Features
 
@@ -38,26 +41,27 @@ Use **Open** to load a `.sql` file into an editor tab, or **Import .sql…** (or
 Prerequisites: Docker Engine and Docker Compose v2.
 
 ```bash
-git clone https://github.com/hexawulf/sqlyard.git
-cd sqlyard
+git clone https://github.com/hexawulf/sql-scratchpad.git
+cd sql-scratchpad
 cp deploy/db.env.example deploy/db.env
 cp deploy/app.env.example deploy/app.env
 ```
 
-Generate strong random passwords (for example with `openssl rand -base64 32`), put matching `SQLYARD_ADMIN_PASSWORD` values in `deploy/db.env` and `deploy/app.env`, set `MARIADB_ROOT_PASSWORD` only in `deploy/db.env`, lock down permissions, and start the stack:
+Generate strong random passwords (for example with `openssl rand -base64 32`), put matching `SQLSCRATCHPAD_ADMIN_PASSWORD` values in `deploy/db.env` and `deploy/app.env`, set `MARIADB_ROOT_PASSWORD` only in `deploy/db.env`, lock down permissions, and start the stack:
 
 ```bash
 chmod 600 deploy/db.env deploy/app.env
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
-SQLyard listens on `http://127.0.0.1:5050` by default. See [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) for configuration, reverse-proxy setup, and maintenance.
+SQL Scratchpad listens on `http://127.0.0.1:5050` by default. See [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) for configuration, reverse-proxy setup, and maintenance.
 
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Self-Hosting Guide](docs/SELF-HOSTING.md)
 - [Security & Threat Model](SECURITY.md)
+- [Changelog](CHANGELOG.md)
 - [Third-Party Notices](THIRD_PARTY_NOTICES.md)
 
 ## License

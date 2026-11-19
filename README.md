@@ -1,4 +1,4 @@
-# SQLyard
+# SQL-Scratchpad
 
 A lightweight, Letos-style SQL playground in the browser backed by real **MariaDB 11.4 LTS** isolated workspaces.
 

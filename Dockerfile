@@ -1,0 +1,61 @@
+# syntax=docker/dockerfile:1
+
+# Node 24 LTS (bookworm-slim) multi-arch OCI index (linux/arm64 + linux/amd64)
+ARG NODE_IMAGE=node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54
+
+FROM ${NODE_IMAGE} AS base
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable ; corepack prepare pnpm@12.21.0 --activate
+
+FROM base AS builder
+WORKDIR /src
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json tsconfig.json ./
+COPY shared/package.json ./shared/package.json
+COPY server/package.json ./server/package.json
+COPY web/package.json ./web/package.json
+
+RUN pnpm install --frozen-lockfile
+
+COPY shared ./shared
+COPY server ./server
+COPY web ./web
+
+ARG GIT_SHA=dev
+ENV GIT_SHA=${GIT_SHA}
+
+RUN pnpm --filter @sqlyard/shared build ; pnpm --filter @sqlyard/server build ; pnpm --filter @sqlyard/web build
+
+FROM base AS prod-deps
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY shared/package.json ./shared/package.json
+COPY server/package.json ./server/package.json
+COPY web/package.json ./web/package.json
+
+RUN pnpm --filter @sqlyard/server... install --frozen-lockfile --prod --ignore-scripts
+
+FROM ${NODE_IMAGE} AS runtime
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+ENV PORT=5050
+
+COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
+COPY --from=prod-deps --chown=node:node /app/server/node_modules ./server/node_modules
+COPY --from=builder --chown=node:node /src/shared/package.json ./shared/package.json
+COPY --from=builder --chown=node:node /src/shared/dist ./shared/dist
+COPY --from=builder --chown=node:node /src/server/package.json ./server/package.json
+COPY --from=builder --chown=node:node /src/server/datasets.json ./server/datasets.json
+COPY --from=builder --chown=node:node /src/server/dist ./server/dist
+COPY --from=builder --chown=node:node /src/web/dist ./web/dist
+
+USER node
+EXPOSE 5050
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:5050/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+CMD ["node", "server/dist/server.js"]

@@ -1,0 +1,22 @@
+{
+  "name": "@sqlyard/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "PORT=5051 tsx src/server.ts",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@fastify/rate-limit": "^11.2.2",
+    "@sqlyard/shared": "workspace:*",
+    "dbgate-query-splitter": "^4.12.0",
+    "dotenv": "^17.2.0",
+    "fastify": "^5.12.8",
+    "mysql2": "^3.15.0",
+    "pino": "^10.4.0",
+    "zod": "^4.6.7"
+  }
+}

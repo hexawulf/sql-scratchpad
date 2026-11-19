@@ -1,0 +1,162 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint, Build, Unit & Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      mariadb:
+        image: mariadb:11.4@sha256:5e73baf8179b29f115101bb102763a47a017361f3e9792daccba6646c3ab1532
+        env:
+          MARIADB_ROOT_PASSWORD: ci-root-password
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+          --health-start-period=15s
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Enable Corepack and pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@12.21.0 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build
+        run: pnpm build
+
+      - name: Unit and component tests
+        run: pnpm exec vitest run --project unit --project web
+
+      - name: Provision admin user and seed MariaDB template
+        env:
+          MYSQL_PWD: ci-root-password
+        run: |
+          mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u root -e "
+            CREATE USER IF NOT EXISTS 'sqlyard_admin'@'%' IDENTIFIED BY 'ci-admin-password';
+            GRANT CREATE USER, CONNECTION ADMIN ON *.* TO 'sqlyard_admin'@'%';
+            GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, INDEX, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, CREATE TEMPORARY TABLES, LOCK TABLES, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON \`ws\\_%\`.* TO 'sqlyard_admin'@'%' WITH GRANT OPTION;
+            GRANT SELECT, SHOW VIEW, TRIGGER ON \`tpl\\_%\`.* TO 'sqlyard_admin'@'%';
+            GRANT SELECT (User, Host) ON mysql.user TO 'sqlyard_admin'@'%';
+            FLUSH PRIVILEGES;
+            CREATE DATABASE IF NOT EXISTS tpl_sample_library CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          "
+          mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u root tpl_sample_library < seeds/sample-library.sql
+
+      - name: Verify sample-library seed (MariaDB + sql.js)
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3307'
+          SQLYARD_ADMIN_PASSWORD: ci-admin-password
+        run: pnpm seeds:verify
+
+      - name: Integration tests
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3307'
+          SQLYARD_ADMIN_PASSWORD: ci-admin-password
+        run: pnpm test:int
+
+  e2e:
+    name: E2E Tests (Playwright Chromium)
+    runs-on: ubuntu-latest
+
+    services:
+      mariadb:
+        image: mariadb:11.4@sha256:5e73baf8179b29f115101bb102763a47a017361f3e9792daccba6646c3ab1532
+        env:
+          MARIADB_ROOT_PASSWORD: ci-root-password
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+          --health-start-period=15s
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Enable Corepack and pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@12.21.0 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Provision admin user and seed MariaDB template
+        env:
+          MYSQL_PWD: ci-root-password
+        run: |
+          mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u root -e "
+            CREATE USER IF NOT EXISTS 'sqlyard_admin'@'%' IDENTIFIED BY 'ci-admin-password';
+            GRANT CREATE USER, CONNECTION ADMIN ON *.* TO 'sqlyard_admin'@'%';
+            GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, INDEX, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, CREATE TEMPORARY TABLES, LOCK TABLES, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON \`ws\\_%\`.* TO 'sqlyard_admin'@'%' WITH GRANT OPTION;
+            GRANT SELECT, SHOW VIEW, TRIGGER ON \`tpl\\_%\`.* TO 'sqlyard_admin'@'%';
+            GRANT SELECT (User, Host) ON mysql.user TO 'sqlyard_admin'@'%';
+            FLUSH PRIVILEGES;
+            CREATE DATABASE IF NOT EXISTS tpl_sample_library CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          "
+          mysql --protocol=TCP -h 127.0.0.1 -P 3307 -u root tpl_sample_library < seeds/sample-library.sql
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Start app and run Playwright E2E
+        env:
+          HOST: 127.0.0.1
+          PORT: '5050'
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3307'
+          SQLYARD_ADMIN_PASSWORD: ci-admin-password
+          LOG_LEVEL: warn
+          SQLYARD_BASE_URL: http://127.0.0.1:5050
+        run: |
+          node server/dist/server.js &
+          APP_PID=$!
+          trap 'kill "${APP_PID}" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:5050/api/health >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:5050/api/health
+          pnpm test:e2e -- --project=chromium

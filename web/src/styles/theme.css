@@ -1,0 +1,116 @@
+:root {
+  --bg-app: #f4f5f7;
+  --bg-surface: #ffffff;
+  --bg-subtle: #eef0f4;
+  --bg-elevated: #ffffff;
+  --bg-hover: #e5e9f0;
+  --bg-active: #dbeafe;
+  --bg-header: #f8fafc;
+  --border: #d1d5db;
+  --border-subtle: #e5e7eb;
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-muted: #6b7280;
+  --accent: #1d4ed8;
+  --accent-hover: #1e40af;
+  --accent-text: #ffffff;
+  --danger: #b91c1c;
+  --danger-bg: #fef2f2;
+  --warning: #92400e;
+  --warning-bg: #fffbeb;
+  --success: #166534;
+  --success-bg: #f0fdf4;
+  --null-text: #9ca3af;
+  --error-line-bg: rgba(220, 38, 38, 0.14);
+  --splitter-bg: #e5e7eb;
+  --splitter-hover: #93c5fd;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+:root[data-theme='dark'] {
+  --bg-app: #0f1419;
+  --bg-surface: #151b23;
+  --bg-subtle: #1c2430;
+  --bg-elevated: #1f2937;
+  --bg-hover: #253041;
+  --bg-active: #1e3a5f;
+  --bg-header: #18202b;
+  --border: #303b4d;
+  --border-subtle: #232c3a;
+  --text-primary: #e6edf3;
+  --text-secondary: #b1bac4;
+  --text-muted: #8b949e;
+  --accent: #3b82f6;
+  --accent-hover: #60a5fa;
+  --accent-text: #ffffff;
+  --danger: #f87171;
+  --danger-bg: rgba(185, 28, 28, 0.2);
+  --warning: #fbbf24;
+  --warning-bg: rgba(146, 64, 14, 0.22);
+  --success: #4ade80;
+  --success-bg: rgba(22, 101, 52, 0.22);
+  --null-text: #6e7681;
+  --error-line-bg: rgba(248, 113, 113, 0.2);
+  --splitter-bg: #232c3a;
+  --splitter-hover: #3b82f6;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+button,
+select,
+input {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Splitpanes styling */
+.splitpanes {
+  background: var(--bg-app);
+}
+.splitpanes__pane {
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+.splitpanes--vertical > .splitpanes__splitter {
+  width: 5px;
+  background: var(--splitter-bg);
+  cursor: col-resize;
+  transition: background 0.12s ease;
+}
+.splitpanes--horizontal > .splitpanes__splitter {
+  height: 5px;
+  background: var(--splitter-bg);
+  cursor: row-resize;
+  transition: background 0.12s ease;
+}
+.splitpanes__splitter:hover,
+.splitpanes__splitter:active {
+  background: var(--splitter-hover);
+}

@@ -2,7 +2,6 @@
 
 A lightweight, Letos-style SQL playground in the browser backed by real **MariaDB 11.4 LTS** isolated workspaces.
 
-<!-- TODO: add docs/screenshot.png after 0.2.0 deploy -->
 ![SQLyard workspace screenshot](docs/screenshot.png)
 
 ## Features

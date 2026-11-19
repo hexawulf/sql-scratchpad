@@ -159,4 +159,4 @@ jobs:
             sleep 1
           done
           curl -fsS http://127.0.0.1:5050/api/health
-          pnpm test:e2e -- --project=chromium
+          pnpm exec playwright test --project=chromium

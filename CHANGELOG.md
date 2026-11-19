@@ -2,6 +2,23 @@
 
 All notable changes to SQL Scratchpad are documented in this file.
 
+## [0.3.1] - 2026-11-20
+
+### Security
+
+- **IPv6 prefix & mapped-IPv4 normalisation (`IPV6_PREFIX_BITS`, default `64`):** client addresses are now normalised before hashing for rate-limit buckets, import byte budgets, and per-key workspace ownership caps — IPv4 stays as-is, IPv4-mapped IPv6 (`::ffff:a.b.c.d`) unwraps to plain IPv4, and native IPv6 collapses to its configured prefix (`/64` by default).
+- **Separated log and rate-limit hashing salts:** request logs retain the daily-rotated (UTC) in-memory random salt, while rate-limit and workspace-ownership keys now use a separate process-lifetime in-memory random salt (never rotated, never logged) so UTC midnight no longer resets per-key workspace caps or rate-limit buckets.
+- **Additional route rate limits:** added per-key rate limits to `POST /api/workspaces/:wsId/reset` (`10/h`), `POST /api/workspaces/:wsId/sessions/:session/kill` (`60/min`), and `DELETE /api/workspaces/:wsId` (`60/min`), all returning `429` with `Retry-After`.
+- **Static SPA handler defence-in-depth:** `registerStaticSpa` now refuses dotfiles/dot-directories and path traversal segments with HTTP `404` directly in the app, independent of reverse-proxy rules.
+
+### Fixed
+
+- **Session-lock-aware reset, delete, and janitor:** `resetWorkspace` and `deleteWorkspace` now acquire session locks before tearing down connections (sending `KILL QUERY` and waiting up to 10 s for clean release if a statement or import is running, with zero lock leaks on error/timeout paths). The background janitor now skips busy workspaces and sessions rather than tearing them down mid-request.
+
+### Changed
+
+- Lowered default `IMPORT_TIMEOUT_MS` from `90 s` (`90000`) to `75 s` (`75000`, configurable via env) to leave headroom under ~100 s upstream reverse-proxy/CDN timeouts.
+
 ## [0.3.0] - 2026-11-19
 
 ### Changed

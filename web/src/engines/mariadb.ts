@@ -17,13 +17,30 @@ import type {
 export class ApiHttpError extends Error {
   readonly status: number;
   readonly code: string;
+  readonly retryAfterSec?: number;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, retryAfterSec?: number) {
     super(message);
     this.name = 'ApiHttpError';
     this.status = status;
     this.code = code;
+    this.retryAfterSec = retryAfterSec;
   }
+}
+
+export function parseRetryAfterSeconds(raw: string | null | undefined): number | undefined {
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  if (/^\d+$/.test(trimmed)) {
+    const secs = Number(trimmed);
+    return Number.isFinite(secs) && secs > 0 ? secs : undefined;
+  }
+  const dateMs = Date.parse(trimmed);
+  if (!Number.isNaN(dateMs)) {
+    const diffSec = Math.ceil((dateMs - Date.now()) / 1000);
+    return diffSec > 0 ? diffSec : undefined;
+  }
+  return undefined;
 }
 
 export class WorkspaceExpiredError extends ApiHttpError {
@@ -133,6 +150,21 @@ export class MariaDbAdapter implements EngineAdapter {
     );
   }
 
+  closeWithBeacon(): boolean {
+    if (!this.wsId) return false;
+    if (typeof navigator === 'undefined' || typeof navigator.sendBeacon !== 'function') {
+      return false;
+    }
+    const wsId = this.wsId;
+    const url = `${this.baseUrl}/workspaces/${encodeURIComponent(wsId)}/close`;
+    const sent = navigator.sendBeacon(url);
+    if (sent) {
+      this.wsId = null;
+      this.database = null;
+    }
+    return sent;
+  }
+
   async close(): Promise<void> {
     if (!this.wsId) return;
     const wsId = this.wsId;
@@ -174,10 +206,11 @@ export class MariaDbAdapter implements EngineAdapter {
       } catch {
         // Non-JSON error body
       }
+      const retryAfterSec = parseRetryAfterSeconds(response.headers.get('retry-after'));
       if (response.status === 404) {
         throw new WorkspaceExpiredError(message);
       }
-      throw new ApiHttpError(response.status, code, message);
+      throw new ApiHttpError(response.status, code, message, retryAfterSec);
     }
     return (await response.json()) as T;
   }

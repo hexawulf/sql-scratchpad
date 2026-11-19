@@ -69,12 +69,13 @@ Template databases (`tpl_*`) are seeded once during container initialization. Cl
 |---|---|---|
 | `GET /api/health` | — | Health check (`{"status":"ok"\|"degraded"\|"maintenance","db":"ok"\|"error","version":...}`) |
 | `GET /api/datasets` | — | Available built-in datasets (`sample-library`, `empty`) |
-| `POST /api/workspaces` | 3 live/key, 10/h per key, 50 global | Create an isolated workspace from a dataset |
+| `POST /api/workspaces` | 6 live/key, 20/h per key, 50 global | Create an isolated workspace from a dataset |
 | `POST /api/workspaces/:wsId/reset` | 10/h per key | Reset workspace to a dataset (kills/waits for busy sessions first) |
 | `POST /api/workspaces/:wsId/exec` | 256 KB, 60/min per key | Execute SQL on pinned session A or B |
 | `POST /api/workspaces/:wsId/import` | 6 MB, 20/h & 30 MB/h per key | Bulk-import a `.sql` script into the workspace |
 | `GET /api/workspaces/:wsId/schema` | 120/min per key | Introspect tables, columns, indexes, FKs, triggers, views |
 | `POST /api/workspaces/:wsId/sessions/:session/kill` | 60/min per key | `KILL QUERY` on a running statement |
+| `POST /api/workspaces/:wsId/close` | 60/min per key, IP-owner checked | Best-effort `sendBeacon` workspace close on `pagehide` (same teardown as `DELETE`) |
 | `DELETE /api/workspaces/:wsId` | 60/min per key | Drop workspace database and user (kills/waits for busy sessions first) |
 
 ## Janitor

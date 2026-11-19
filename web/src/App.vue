@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { Pane, Splitpanes } from 'splitpanes';
 import type {
   DatasetMeta,
@@ -30,6 +30,7 @@ import {
 } from './utils/storage';
 import { containsDdlStatement } from './utils/sql-statement';
 import {
+  formatApiErrorForUser,
   formatDurationSeconds,
   formatNoticeLine,
   formatStatementStatusLines,
@@ -107,7 +108,10 @@ const running = ref(false);
 const txOpen = ref(false);
 const errorLine = ref<number | null>(null);
 const bannerNotice = ref<string | null>(null);
+const errorBanner = ref<string | null>(null);
+const workspaceError = ref<string | null>(null);
 const maintenanceMode = ref(false);
+let bootstrapPromise: Promise<void> | null = null;
 
 const lastResults = ref<StatementResult[]>([]);
 const selectedResultIdx = ref<number>(0);
@@ -162,25 +166,57 @@ watch([wsId, currentDataset, tabs, activeTabId, historyEntries, settings], persi
   deep: true,
 });
 
-async function recreateWorkspaceWithNotice(): Promise<void> {
-  await adapter.open(currentDataset.value);
+async function waitForBootstrap(): Promise<void> {
+  if (bootstrapPromise) {
+    await bootstrapPromise;
+  }
+}
+
+function surfaceApiError(
+  prefix: string,
+  err: unknown,
+  options: { workspaceFailed?: boolean } = {},
+): string {
+  const { message, isRateLimitOrCapacity } = formatApiErrorForUser(err);
+  pushStatus(formatNoticeLine(`${prefix}: ${message}`, 'error'));
+  if (isRateLimitOrCapacity) {
+    errorBanner.value = message;
+  }
+  if (options.workspaceFailed || (!schema.value && isRateLimitOrCapacity)) {
+    workspaceError.value = message;
+  }
+  return message;
+}
+
+async function recreateWorkspaceWithNotice(datasetId = currentDataset.value): Promise<void> {
+  await adapter.open(datasetId);
   wsId.value = adapter.getWorkspaceId();
-  const msg = `Workspace expired — fresh copy of ${currentDataset.value} loaded`;
+  workspaceError.value = null;
+  errorBanner.value = null;
+  const msg = `Workspace expired — fresh copy of ${datasetId} loaded`;
   bannerNotice.value = msg;
   pushStatus(formatNoticeLine(msg, 'notice'));
   await refreshSchema(false);
 }
 
-async function refreshSchema(allowAutoRecreate = true): Promise<void> {
+async function refreshSchema(allowAutoRecreate = true, waitBootstrap = false): Promise<void> {
+  if (waitBootstrap) {
+    await waitForBootstrap();
+  }
   schemaLoading.value = true;
   try {
     schema.value = await adapter.schema();
+    workspaceError.value = null;
   } catch (err) {
     if (err instanceof WorkspaceExpiredError && allowAutoRecreate) {
-      await recreateWorkspaceWithNotice();
+      try {
+        await recreateWorkspaceWithNotice();
+      } catch (recreateErr) {
+        surfaceApiError('Workspace creation failed', recreateErr, { workspaceFailed: true });
+      }
       return;
     }
-    pushStatus(formatNoticeLine(`Failed to load schema: ${(err as Error).message}`, 'error'));
+    surfaceApiError('Failed to load schema', err, { workspaceFailed: !schema.value });
   } finally {
     schemaLoading.value = false;
   }
@@ -191,12 +227,9 @@ async function bootstrap(): Promise<void> {
     const health = await adapter.fetchHealth();
     if (health.status === 'maintenance') {
       maintenanceMode.value = true;
-      pushStatus(
-        formatNoticeLine(
-          'SQL Scratchpad is currently in maintenance mode. Please try again shortly.',
-          'error',
-        ),
-      );
+      const maintMsg = 'SQL Scratchpad is currently in maintenance mode. Please try again shortly.';
+      workspaceError.value = maintMsg;
+      pushStatus(formatNoticeLine(maintMsg, 'error'));
       return;
     }
   } catch {
@@ -214,7 +247,7 @@ async function bootstrap(): Promise<void> {
         : datasets.value[0]!.id;
     }
   } catch (err) {
-    pushStatus(formatNoticeLine(`Failed to load datasets: ${(err as Error).message}`, 'error'));
+    surfaceApiError('Failed to load datasets', err);
   }
 
   if (wsId.value) {
@@ -223,21 +256,30 @@ async function bootstrap(): Promise<void> {
       schemaLoading.value = true;
       schema.value = await adapter.schema();
       schemaLoading.value = false;
+      workspaceError.value = null;
+      errorBanner.value = null;
       pushStatus(formatNoticeLine(`Connected to workspace ${schema.value.database}.`, 'notice'));
       return;
     } catch (err) {
       schemaLoading.value = false;
       if (err instanceof WorkspaceExpiredError) {
-        await recreateWorkspaceWithNotice();
+        try {
+          await recreateWorkspaceWithNotice();
+        } catch (recreateErr) {
+          surfaceApiError('Workspace creation failed', recreateErr, { workspaceFailed: true });
+        }
         return;
       }
-      pushStatus(formatNoticeLine(`Reconnect error: ${(err as Error).message}`, 'error'));
+      surfaceApiError('Reconnect error', err, { workspaceFailed: true });
+      return;
     }
   }
 
   try {
     await adapter.open(currentDataset.value);
     wsId.value = adapter.getWorkspaceId();
+    workspaceError.value = null;
+    errorBanner.value = null;
     await refreshSchema(false);
     pushStatus(
       formatNoticeLine(
@@ -246,7 +288,7 @@ async function bootstrap(): Promise<void> {
       ),
     );
   } catch (err) {
-    pushStatus(formatNoticeLine(`Workspace creation failed: ${(err as Error).message}`, 'error'));
+    surfaceApiError('Workspace creation failed', err, { workspaceFailed: true });
   }
 }
 
@@ -255,7 +297,9 @@ async function executeSql(
   options: { lineOffset?: number; recordHistory?: boolean; echoSqlInStatus?: boolean } = {},
 ): Promise<ExecResponse | null> {
   const trimmed = sqlText.trim();
-  if (!trimmed || running.value) return null;
+  if (!trimmed) return null;
+  await waitForBootstrap();
+  if (running.value) return null;
 
   const lineOffset = options.lineOffset ?? 0;
   running.value = true;
@@ -274,6 +318,12 @@ async function executeSql(
   };
 
   try {
+    if (!adapter.getWorkspaceId()) {
+      await adapter.open(currentDataset.value);
+      wsId.value = adapter.getWorkspaceId();
+      await refreshSchema(false);
+    }
+
     let response: ExecResponse;
     try {
       response = await runOnce();
@@ -285,6 +335,9 @@ async function executeSql(
         throw err;
       }
     }
+
+    errorBanner.value = null;
+    workspaceError.value = null;
 
     txOpen.value = response.txOpen;
     lastResults.value = response.results;
@@ -329,7 +382,7 @@ async function executeSql(
 
     return response;
   } catch (err) {
-    pushStatus(formatNoticeLine(`Execution failed: ${(err as Error).message}`, 'error'));
+    surfaceApiError('Execution failed', err, { workspaceFailed: !schema.value });
     return null;
   } finally {
     running.value = false;
@@ -378,10 +431,8 @@ async function handleDatasetChange(newDataset: string): Promise<void> {
 
 async function handleWelcomePickEmpty(): Promise<void> {
   showWelcome.value = false;
-  if (currentDataset.value !== 'empty') {
-    currentDataset.value = 'empty';
-    await resetWorkspaceTo('empty');
-  }
+  currentDataset.value = 'empty';
+  await resetWorkspaceTo('empty');
 }
 
 async function handleWelcomePickSample(): Promise<void> {
@@ -425,7 +476,9 @@ function handleCloseImportModal(): void {
 
 async function handleConfirmImport(mode: ImportMode): Promise<void> {
   const file = pendingImportFile.value;
-  if (!file || importing.value || running.value) return;
+  if (!file) return;
+  await waitForBootstrap();
+  if (importing.value || running.value) return;
 
   importing.value = true;
   running.value = true;
@@ -434,6 +487,11 @@ async function handleConfirmImport(mode: ImportMode): Promise<void> {
 
   try {
     const sqlText = await file.text();
+    const targetDataset = mode === 'fresh' ? 'empty' : currentDataset.value;
+    if (!adapter.getWorkspaceId()) {
+      await adapter.open(targetDataset);
+      wsId.value = adapter.getWorkspaceId();
+    }
     const runImportOnce = async (): Promise<ImportResponse> =>
       adapter.importSql({ sql: sqlText, mode });
 
@@ -442,12 +500,15 @@ async function handleConfirmImport(mode: ImportMode): Promise<void> {
       response = await runImportOnce();
     } catch (err) {
       if (err instanceof WorkspaceExpiredError) {
-        await recreateWorkspaceWithNotice();
+        await recreateWorkspaceWithNotice(targetDataset);
         response = await runImportOnce();
       } else {
         throw err;
       }
     }
+
+    errorBanner.value = null;
+    workspaceError.value = null;
 
     lastImportSummary.value = { fileName: file.name, response };
     showWelcome.value = false;
@@ -489,9 +550,10 @@ async function handleConfirmImport(mode: ImportMode): Promise<void> {
     importModalOpen.value = false;
     pendingImportFile.value = null;
   } catch (err) {
-    const msg = (err as Error).message || 'Import failed';
+    const msg = surfaceApiError(`Import failed (${file.name})`, err, {
+      workspaceFailed: !schema.value,
+    });
     importModalError.value = msg;
-    pushStatus(formatNoticeLine(`Import failed (${file.name}): ${msg}`, 'error'));
   } finally {
     importing.value = false;
     running.value = false;
@@ -499,27 +561,35 @@ async function handleConfirmImport(mode: ImportMode): Promise<void> {
 }
 
 async function resetWorkspaceTo(datasetId: string): Promise<void> {
+  await waitForBootstrap();
   if (running.value) return;
   running.value = true;
   errorLine.value = null;
   try {
-    try {
-      await adapter.reset(datasetId);
-    } catch (err) {
-      if (err instanceof WorkspaceExpiredError) {
-        await adapter.open(datasetId);
-        wsId.value = adapter.getWorkspaceId();
-      } else {
-        throw err;
+    if (adapter.getWorkspaceId()) {
+      try {
+        await adapter.reset(datasetId);
+      } catch (err) {
+        if (err instanceof WorkspaceExpiredError) {
+          await adapter.open(datasetId);
+          wsId.value = adapter.getWorkspaceId();
+        } else {
+          throw err;
+        }
       }
+    } else {
+      await adapter.open(datasetId);
+      wsId.value = adapter.getWorkspaceId();
     }
+    errorBanner.value = null;
+    workspaceError.value = null;
     txOpen.value = false;
     lastResults.value = [];
     lastImportSummary.value = null;
     await refreshSchema(false);
     pushStatus(formatNoticeLine(`Database reset to dataset "${datasetId}".`, 'notice'));
   } catch (err) {
-    pushStatus(formatNoticeLine(`Reset failed: ${(err as Error).message}`, 'error'));
+    surfaceApiError('Reset failed', err, { workspaceFailed: !schema.value });
   } finally {
     running.value = false;
   }
@@ -642,8 +712,28 @@ function formatResultLabel(res: StatementResult, pos: number, total: number): st
   return `Result ${pos + 1} of ${total} · ${snippet}`;
 }
 
+function handlePageHide(event: PageTransitionEvent): void {
+  if (event.persisted) return;
+  if (!adapter.getWorkspaceId()) return;
+  if (adapter.closeWithBeacon()) {
+    wsId.value = null;
+    persistNow();
+  }
+}
+
 onMounted(() => {
-  void bootstrap();
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pagehide', handlePageHide);
+  }
+  bootstrapPromise = bootstrap().finally(() => {
+    bootstrapPromise = null;
+  });
+});
+
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('pagehide', handlePageHide);
+  }
 });
 </script>
 
@@ -796,6 +886,19 @@ onMounted(() => {
       </span>
     </div>
 
+    <div v-if="errorBanner" class="error-banner" role="alert" data-testid="error-banner">
+      <span>{{ errorBanner }}</span>
+      <button
+        type="button"
+        class="banner-close"
+        aria-label="Dismiss error"
+        data-testid="error-banner-close"
+        @click="errorBanner = null"
+      >
+        ×
+      </button>
+    </div>
+
     <div v-if="bannerNotice" class="notice-banner" role="status" data-testid="expired-banner">
       <span>{{ bannerNotice }}</span>
       <button type="button" class="banner-close" @click="bannerNotice = null">×</button>
@@ -812,7 +915,8 @@ onMounted(() => {
                 v-if="sidebarTab === 'databases'"
                 :schema="schema"
                 :loading="schemaLoading"
-                @refresh="refreshSchema()"
+                :error="workspaceError"
+                @refresh="refreshSchema(true, true)"
                 @insert-ident="(ident) => editorRef?.insertText(ident)"
                 @preview-table="handlePreviewTable"
                 @drop-sql-file="handleImportFileSelected"
@@ -1162,6 +1266,19 @@ onMounted(() => {
   color: var(--error, #991b1b);
   border-bottom: 1px solid var(--border);
   font-size: 13px;
+  font-weight: 600;
+}
+
+.error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-bottom: 1px solid var(--danger);
+  font-size: 12.5px;
   font-weight: 600;
 }
 

@@ -1,10 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ApiHttpError, MariaDbAdapter, WorkspaceExpiredError } from './mariadb';
+import {
+  ApiHttpError,
+  MariaDbAdapter,
+  WorkspaceExpiredError,
+  parseRetryAfterSeconds,
+} from './mariadb';
 
-function jsonResponse(status: number, body: unknown): Response {
+function jsonResponse(
+  status: number,
+  body: unknown,
+  extraHeaders: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...extraHeaders },
   });
 }
 
@@ -101,5 +110,67 @@ describe('MariaDbAdapter', () => {
     await expect(
       adapter.exec({ sql: 'SELECT 1;', session: 'A', stopOnError: true }),
     ).rejects.toBeInstanceOf(ApiHttpError);
+  });
+
+  it('parses Retry-After header onto ApiHttpError for 429 and 503 responses', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          429,
+          {
+            error: {
+              code: 'PER_IP_WORKSPACE_LIMIT',
+              message: 'You have reached the maximum of 6 active workspaces per IP.',
+            },
+          },
+          { 'retry-after': '7200' },
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(
+          503,
+          {
+            error: {
+              code: 'WORKSPACE_LIMIT_REACHED',
+              message: 'SQL Scratchpad is busy, try again in a few minutes',
+            },
+          },
+          { 'retry-after': '180' },
+        ),
+      );
+
+    const adapter = new MariaDbAdapter({ fetchImpl: fetchMock as unknown as typeof fetch });
+    await expect(adapter.open('empty')).rejects.toMatchObject({
+      status: 429,
+      code: 'PER_IP_WORKSPACE_LIMIT',
+      retryAfterSec: 7200,
+    });
+    await expect(adapter.open('empty')).rejects.toMatchObject({
+      status: 503,
+      code: 'WORKSPACE_LIMIT_REACHED',
+      retryAfterSec: 180,
+    });
+    expect(parseRetryAfterSeconds('120')).toBe(120);
+    expect(parseRetryAfterSeconds('invalid')).toBeUndefined();
+  });
+
+  it('sends best-effort POST /close beacon and clears workspace state', () => {
+    const beaconSpy = vi.fn().mockReturnValue(true);
+    vi.stubGlobal('navigator', { sendBeacon: beaconSpy });
+    try {
+      const adapter = new MariaDbAdapter({
+        initialWsId: 'wsbeacon1234',
+        initialDatabase: 'ws_123456abcdef',
+      });
+      expect(adapter.closeWithBeacon()).toBe(true);
+      expect(beaconSpy).toHaveBeenCalledWith('/api/workspaces/wsbeacon1234/close');
+      expect(adapter.getWorkspaceId()).toBeNull();
+      expect(adapter.getDatabase()).toBeNull();
+      // Calling again is a no-op
+      expect(adapter.closeWithBeacon()).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

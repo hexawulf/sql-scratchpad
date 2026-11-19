@@ -94,7 +94,7 @@ const EnvSchema = z.object({
     .positive()
     .default(5 * 60 * 1000),
   MAX_WORKSPACES: z.coerce.number().int().positive().default(50),
-  MAX_WORKSPACES_PER_IP: z.coerce.number().int().positive().default(3),
+  MAX_WORKSPACES_PER_IP: z.coerce.number().int().positive().default(6),
   IPV6_PREFIX_BITS: z.coerce.number().int().min(1).max(128).default(64),
   LOADTEST_ALLOW_IPS: z
     .string()

@@ -5,7 +5,8 @@ import {
   extractStatementAtCursor,
   splitStatementsWithOffsets,
 } from './sql-statement';
-import { formatStatementStatusLines } from './status-format';
+import { formatApiErrorForUser, formatStatementStatusLines } from './status-format';
+import { ApiHttpError } from '../engines/mariadb';
 import { formatCellText, isNumericColumnType, toMarkdownTable, toTsv } from './export-grid';
 import {
   STORAGE_KEY,
@@ -98,6 +99,42 @@ describe('status-format (Letos wording)', () => {
     );
     expect(lines[1]?.level).toBe('warning');
     expect(lines[1]?.message).toBe('[09:05:01] Warning 1265: Data truncated');
+  });
+
+  it('formats 429 and 503 ApiHttpError messages with Retry-After in minutes', () => {
+    const capErr = new ApiHttpError(
+      429,
+      'PER_IP_WORKSPACE_LIMIT',
+      'You have reached the maximum of 6 active workspaces per IP. Close a workspace or wait for it to expire.',
+      7200,
+    );
+    expect(formatApiErrorForUser(capErr)).toEqual({
+      message:
+        'You have reached the maximum of 6 active workspaces per IP. Close a workspace or wait for it to expire. Please try again in 120 minutes.',
+      isRateLimitOrCapacity: true,
+    });
+
+    const shortErr = new ApiHttpError(429, 'RATE_LIMITED', 'Rate limit exceeded', 45);
+    expect(formatApiErrorForUser(shortErr)).toEqual({
+      message: 'Rate limit exceeded. Please try again in 1 minute.',
+      isRateLimitOrCapacity: true,
+    });
+
+    const busyErr = new ApiHttpError(
+      503,
+      'WORKSPACE_LIMIT_REACHED',
+      'SQL Scratchpad is busy, try again in a few minutes',
+    );
+    expect(formatApiErrorForUser(busyErr)).toEqual({
+      message: 'SQL Scratchpad is busy, try again in a few minutes',
+      isRateLimitOrCapacity: true,
+    });
+
+    const genericErr = new Error('Network down');
+    expect(formatApiErrorForUser(genericErr)).toEqual({
+      message: 'Network down',
+      isRateLimitOrCapacity: false,
+    });
   });
 });
 

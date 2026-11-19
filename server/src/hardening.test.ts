@@ -51,7 +51,8 @@ describe('M8-lite hardening unit checks', () => {
     expect(cfg.SESSION_IDLE_TTL_MS).toBe(10 * 60 * 1000);
     expect(cfg.JANITOR_INTERVAL_MS).toBe(5 * 60 * 1000);
     expect(cfg.MAX_WORKSPACES).toBe(50);
-    expect(cfg.MAX_WORKSPACES_PER_IP).toBe(3);
+    expect(cfg.MAX_WORKSPACES_PER_IP).toBe(6);
+    expect(loadConfig({ ...BASE_ENV, MAX_WORKSPACES_PER_IP: '4' }).MAX_WORKSPACES_PER_IP).toBe(4);
     expect(cfg.MAINTENANCE).toBe(false);
   });
 
@@ -145,9 +146,9 @@ describe('M8-lite hardening unit checks', () => {
     });
 
     try {
-      // /api/workspaces has max 10/h rate limit; trigger validation error 400 after rate-limit check
+      // /api/workspaces has max 20/h rate limit; trigger validation error 400 after rate-limit check
       let got429 = false;
-      for (let i = 0; i < 12; i += 1) {
+      for (let i = 0; i < 22; i += 1) {
         const res = await noTrustCtx.app.inject({
           method: 'POST',
           url: '/api/workspaces',
@@ -178,8 +179,8 @@ describe('M8-lite hardening unit checks', () => {
     });
 
     try {
-      // From trusted proxy with distinct client IPs -> each client gets its own bucket (12 requests all 400, no 429)
-      for (let i = 0; i < 12; i += 1) {
+      // From trusted proxy with distinct client IPs -> each client gets its own bucket (22 requests all 400, no 429)
+      for (let i = 0; i < 22; i += 1) {
         const res = await trustCtx.app.inject({
           method: 'POST',
           url: '/api/workspaces',
@@ -192,9 +193,9 @@ describe('M8-lite hardening unit checks', () => {
         expect(res.statusCode).toBe(400);
       }
 
-      // From untrusted source spoofing X-Forwarded-For -> ignored, hits 429 on 11th request
+      // From untrusted source spoofing X-Forwarded-For -> ignored, hits 429 on 21st request
       let untrustedHit429 = false;
-      for (let i = 0; i < 12; i += 1) {
+      for (let i = 0; i < 22; i += 1) {
         const res = await trustCtx.app.inject({
           method: 'POST',
           url: '/api/workspaces',
@@ -320,8 +321,8 @@ describe('M8-lite hardening unit checks', () => {
     });
 
     try {
-      // 10 creates/h limit: 6 from ::1 + 4 from ::ffff in the SAME /64 exhausts the 10/h bucket
-      for (let i = 0; i < 6; i += 1) {
+      // 20 creates/h limit: 12 from ::1 + 8 from ::2..::9 in the SAME /64 exhausts the 20/h bucket
+      for (let i = 0; i < 12; i += 1) {
         const res = await ctx.app.inject({
           method: 'POST',
           url: '/api/workspaces',
@@ -331,7 +332,7 @@ describe('M8-lite hardening unit checks', () => {
         });
         expect(res.statusCode).toBe(400);
       }
-      for (let i = 0; i < 4; i += 1) {
+      for (let i = 0; i < 8; i += 1) {
         const res = await ctx.app.inject({
           method: 'POST',
           url: '/api/workspaces',
@@ -341,7 +342,7 @@ describe('M8-lite hardening unit checks', () => {
         });
         expect(res.statusCode).toBe(400);
       }
-      // 11th request from another host in the SAME /64 must be rate-limited (429 + Retry-After)
+      // 21st request from another host in the SAME /64 must be rate-limited (429 + Retry-After)
       const samePrefixBlocked = await ctx.app.inject({
         method: 'POST',
         url: '/api/workspaces',
@@ -363,7 +364,7 @@ describe('M8-lite hardening unit checks', () => {
       expect(diffPrefix.statusCode).toBe(400);
 
       // Plain IPv4 and IPv4-mapped IPv6 (::ffff:a.b.c.d) must share the exact same key
-      for (let i = 0; i < 6; i += 1) {
+      for (let i = 0; i < 12; i += 1) {
         const res = await ctx.app.inject({
           method: 'POST',
           url: '/api/workspaces',
@@ -373,7 +374,7 @@ describe('M8-lite hardening unit checks', () => {
         });
         expect(res.statusCode).toBe(400);
       }
-      for (let i = 0; i < 4; i += 1) {
+      for (let i = 0; i < 8; i += 1) {
         const res = await ctx.app.inject({
           method: 'POST',
           url: '/api/workspaces',

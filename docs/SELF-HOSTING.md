@@ -78,7 +78,7 @@ SQL Scratchpad runs as two Docker containers built directly from this repository
 | `SESSION_IDLE_TTL_MS` | `600000` | Idle pinned session timeout in ms (default **10 minutes**; rolls back open transactions). |
 | `JANITOR_INTERVAL_MS` | `300000` | Background janitor sweep interval in ms (default **5 minutes**). |
 | `MAX_WORKSPACES` | `50` | Maximum concurrent live workspaces globally before returning HTTP `503`. |
-| `MAX_WORKSPACES_PER_IP` | `3` | Maximum concurrent live workspaces per client key (IPv4 or IPv6 prefix) before returning HTTP `429` with `Retry-After`. |
+| `MAX_WORKSPACES_PER_IP` | `6` | Maximum concurrent live workspaces per client key (IPv4 or IPv6 prefix) before returning HTTP `429` with `Retry-After`. Defaults to `6` to accommodate shared IPv4 / CGNAT and campus/office NAT while keeping per-key usage bounded. |
 | `IPV6_PREFIX_BITS` | `64` | Prefix length (`1`–`128`) used to collapse native IPv6 client addresses before hashing for rate limits and workspace ownership. IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is unwrapped to plain IPv4 first. |
 | `MAX_WORKSPACE_BYTES` | `52428800` | Per-workspace disk cap in bytes (50 MB). |
 | `IMPORT_TIMEOUT_MS` | `75000` | Wall-clock cap for `POST /api/workspaces/:wsId/import` (75 s, leaving margin under upstream ~100 s CDN/proxy timeouts). |

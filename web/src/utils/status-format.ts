@@ -1,4 +1,5 @@
 import type { StatementResult } from '@sql-scratchpad/shared';
+import { ApiHttpError } from '../engines/mariadb';
 import type { StatusLogEntry } from '../types/state';
 
 export function formatTimeHHMMSS(date: Date = new Date()): string {
@@ -67,5 +68,36 @@ export function formatNoticeLine(
     timestamp: ts,
     level,
     message: `[${ts}] ${text}`,
+  };
+}
+
+export function formatRetryAfterMinutes(retryAfterSec: number): string {
+  const minutes = Math.max(1, Math.ceil(retryAfterSec / 60));
+  return minutes === 1 ? 'try again in 1 minute' : `try again in ${minutes} minutes`;
+}
+
+export function formatApiErrorForUser(err: unknown): {
+  message: string;
+  isRateLimitOrCapacity: boolean;
+} {
+  if (err instanceof ApiHttpError && (err.status === 429 || err.status === 503)) {
+    const base = err.message.trim() || `Request failed with status ${err.status}`;
+    if (err.retryAfterSec !== undefined && err.retryAfterSec > 0) {
+      const retryPhrase = formatRetryAfterMinutes(err.retryAfterSec);
+      const separator = /[.!?]$/.test(base) ? ' ' : '. ';
+      return {
+        message: `${base}${separator}Please ${retryPhrase}.`,
+        isRateLimitOrCapacity: true,
+      };
+    }
+    return {
+      message: base,
+      isRateLimitOrCapacity: true,
+    };
+  }
+  const message = err instanceof Error && err.message ? err.message : 'Unexpected error';
+  return {
+    message,
+    isRateLimitOrCapacity: false,
   };
 }

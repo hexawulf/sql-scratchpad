@@ -220,7 +220,7 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     {
       schema: { body: datasetBodySchema },
       config: rateLimitEnabled
-        ? { rateLimit: { max: 10, timeWindow: '1 hour' } }
+        ? { rateLimit: { max: 20, timeWindow: '1 hour' } }
         : undefined,
     },
     async (req, reply): Promise<CreateWorkspaceResponse> => {
@@ -347,6 +347,21 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     },
     async (req): Promise<OkResponse> => {
       await workspaceManager.killSessionQuery(req.params.wsId, req.params.session);
+      return { ok: true };
+    },
+  );
+
+  app.post<{ Params: { wsId: string } }>(
+    '/api/workspaces/:wsId/close',
+    {
+      schema: { params: wsIdParamsSchema },
+      config: rateLimitEnabled
+        ? { rateLimit: { max: 60, timeWindow: '1 minute' } }
+        : undefined,
+    },
+    async (req): Promise<OkResponse> => {
+      const callerIpHash = ipHasher.key(req.ip || 'unknown');
+      await workspaceManager.deleteWorkspace(req.params.wsId, undefined, callerIpHash);
       return { ok: true };
     },
   );

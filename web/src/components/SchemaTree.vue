@@ -5,6 +5,7 @@ import type { SchemaTable, SchemaTree } from '@sql-scratchpad/shared';
 const props = defineProps<{
   schema: SchemaTree | null;
   loading: boolean;
+  error?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -106,6 +107,14 @@ function engineLabel(engine: SchemaTree['engine']): string {
 
     <div class="tree-scroll">
       <div v-if="!schema && loading" class="tree-empty">Loading schema…</div>
+      <div
+        v-else-if="!schema && error"
+        class="tree-empty tree-error"
+        role="alert"
+        data-testid="schema-tree-error"
+      >
+        {{ error }}
+      </div>
       <div v-else-if="!schema" class="tree-empty">No workspace connected.</div>
 
       <ul v-else class="tree-root" role="tree">
@@ -308,6 +317,14 @@ function engineLabel(engine: SchemaTree['engine']): string {
 .tree-empty {
   padding: 10px;
   color: var(--text-muted);
+}
+
+.tree-error {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-radius: 4px;
+  margin: 4px;
+  line-height: 1.45;
 }
 
 .tree-root,

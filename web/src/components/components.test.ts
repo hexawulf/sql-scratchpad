@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { flushPromises, mount } from '@vue/test-utils';
 import type { SchemaTree as SchemaTreeData } from '@sql-scratchpad/shared';
+import App from '../App.vue';
 import StatusLog from './StatusLog.vue';
 import ResultGrid from './ResultGrid.vue';
 import SchemaTree from './SchemaTree.vue';
@@ -259,5 +260,197 @@ describe('Vue components', () => {
     expect(card.text()).toContain('Skipped: 2');
     expect(card.text()).toContain('Rewritten: 1');
     expect(card.text()).toContain('items');
+  });
+
+  it('SchemaTree renders workspace error instead of "No workspace connected."', () => {
+    const wrapper = mount(SchemaTree, {
+      props: {
+        schema: null,
+        loading: false,
+        error: 'You have reached the maximum of 6 active workspaces per IP. Please try again in 120 minutes.',
+      },
+    });
+    expect(wrapper.get('[data-testid="schema-tree-error"]').text()).toContain(
+      'try again in 120 minutes',
+    );
+    expect(wrapper.text()).not.toContain('No workspace connected.');
+  });
+});
+
+function makeJsonResponse(
+  status: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json', ...headers },
+  });
+}
+
+const SqlEditorStub = {
+  name: 'SqlEditor',
+  props: ['modelValue', 'cursor', 'schema', 'errorLine', 'theme', 'running'],
+  template: '<div data-testid="sql-editor-stub">{{ modelValue }}</div>',
+  methods: {
+    getRunPayload() {
+      return { sql: (this as unknown as { modelValue: string }).modelValue, lineOffset: 0 };
+    },
+    getStatementPayload() {
+      return { sql: (this as unknown as { modelValue: string }).modelValue, startLine: 1 };
+    },
+    insertText() {},
+    formatDocument() {},
+  },
+};
+
+describe('App workspace lifecycle and 429/503 error UX', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    window.localStorage.clear();
+  });
+
+  it('surfaces 429 create/reset/exec/import errors in banner, status log, and schema tree (never silent "No workspace connected.")', async () => {
+    window.localStorage.clear();
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      if (url === '/api/health') {
+        return makeJsonResponse(200, { status: 'ok', db: 'ok', version: '0.3.2' });
+      }
+      if (url === '/api/datasets') {
+        return makeJsonResponse(200, [
+          { id: 'sample-library', title: 'Sample: Library', description: '', tables: [], engines: ['mariadb'] },
+          { id: 'empty', title: 'Empty', description: '', tables: [], engines: ['mariadb'] },
+        ]);
+      }
+      if (url === '/api/workspaces' && method === 'POST') {
+        return makeJsonResponse(
+          429,
+          {
+            error: {
+              code: 'PER_IP_WORKSPACE_LIMIT',
+              message:
+                'You have reached the maximum of 6 active workspaces per IP. Close a workspace or wait for it to expire.',
+            },
+          },
+          { 'retry-after': '7200' },
+        );
+      }
+      return makeJsonResponse(404, { error: { code: 'NOT_FOUND', message: 'Not found' } });
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const wrapper = mount(App, {
+      global: {
+        stubs: { SqlEditor: SqlEditorStub },
+      },
+    });
+
+    await flushPromises();
+
+    // Visible alert banner shows server message + Retry-After in minutes
+    const banner = wrapper.get('[data-testid="error-banner"]');
+    expect(banner.text()).toContain('maximum of 6 active workspaces per IP');
+    expect(banner.text()).toContain('try again in 120 minutes');
+
+    // Status log shows the same error + Retry-After
+    const statusLog = wrapper.get('[data-testid="status-log"]');
+    expect(statusLog.text()).toContain('maximum of 6 active workspaces per IP');
+    expect(statusLog.text()).toContain('try again in 120 minutes');
+
+    // Schema tree shows the error rather than falling back silently to "No workspace connected."
+    const tree = wrapper.get('[data-testid="schema-tree"]');
+    expect(tree.get('[data-testid="schema-tree-error"]').text()).toContain('try again in 120 minutes');
+    expect(tree.text()).not.toContain('No workspace connected.');
+
+    wrapper.unmount();
+  });
+
+  it('reuses one workspace via POST /reset across Sample: Library, Empty DB, and dataset switches, and calls sendBeacon /close on pagehide', async () => {
+    window.localStorage.clear();
+
+    const calls: Array<{ method: string; url: string }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      calls.push({ method, url });
+
+      if (url === '/api/health') {
+        return makeJsonResponse(200, { status: 'ok', db: 'ok', version: '0.3.2' });
+      }
+      if (url === '/api/datasets') {
+        return makeJsonResponse(200, [
+          { id: 'sample-library', title: 'Sample: Library', description: '', tables: [], engines: ['mariadb'] },
+          { id: 'empty', title: 'Empty', description: '', tables: [], engines: ['mariadb'] },
+        ]);
+      }
+      if (url === '/api/workspaces' && method === 'POST') {
+        return makeJsonResponse(201, {
+          wsId: 'wsreuse123456',
+          database: 'ws_112233445566',
+          expiresAt: '2026-11-20T12:00:00.000Z',
+        });
+      }
+      if (url === '/api/workspaces/wsreuse123456/schema' && method === 'GET') {
+        return makeJsonResponse(200, {
+          database: 'ws_112233445566',
+          engine: 'mariadb',
+          tables: [],
+          views: [],
+        });
+      }
+      if (url === '/api/workspaces/wsreuse123456/reset' && method === 'POST') {
+        return makeJsonResponse(200, { database: 'ws_112233445566' });
+      }
+      if (url === '/api/workspaces/wsreuse123456/exec' && method === 'POST') {
+        return makeJsonResponse(
+          503,
+          { error: { code: 'WORKSPACE_LIMIT_REACHED', message: 'SQL Scratchpad is busy, try again in a few minutes' } },
+          { 'retry-after': '180' },
+        );
+      }
+      return makeJsonResponse(404, { error: { code: 'NOT_FOUND', message: 'Not found' } });
+    });
+
+    const beaconSpy = vi.fn().mockReturnValue(true);
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('navigator', { sendBeacon: beaconSpy });
+
+    const wrapper = mount(App, {
+      global: {
+        stubs: { SqlEditor: SqlEditorStub },
+      },
+    });
+    await flushPromises();
+
+    // Click "Sample: Library" -> must POST /reset, NOT create a second workspace
+    await wrapper.get('[data-testid="welcome-sample-btn"]').trigger('click');
+    await flushPromises();
+
+    // Switch dataset dropdown to empty -> must POST /reset
+    await wrapper.get('[data-testid="dataset-select"]').setValue('empty');
+    await flushPromises();
+
+    // Trigger 503 on exec -> must surface error banner with Retry-After minutes
+    await wrapper.get('[data-testid="run-btn"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.get('[data-testid="error-banner"]').text()).toContain('SQL Scratchpad is busy');
+    expect(wrapper.get('[data-testid="error-banner"]').text()).toContain('try again in 3 minutes');
+
+    const createCalls = calls.filter((c) => c.method === 'POST' && c.url === '/api/workspaces');
+    const resetCalls = calls.filter(
+      (c) => c.method === 'POST' && c.url === '/api/workspaces/wsreuse123456/reset',
+    );
+    expect(createCalls).toHaveLength(1);
+    expect(resetCalls).toHaveLength(2);
+
+    // pagehide frees slot via navigator.sendBeacon to /api/workspaces/:wsId/close
+    window.dispatchEvent(new Event('pagehide'));
+    expect(beaconSpy).toHaveBeenCalledWith('/api/workspaces/wsreuse123456/close');
+
+    wrapper.unmount();
   });
 });

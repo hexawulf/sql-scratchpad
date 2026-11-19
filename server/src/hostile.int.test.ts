@@ -212,7 +212,7 @@ describe('SQL Scratchpad M8-lite hostile corpus & hardening integration (real Ma
     }
   });
 
-  it('enforces per-IP 3 live workspace limit (429 + Retry-After + hint), spoofed XFF resistance, and schema 120/min limit', async () => {
+  it('enforces per-IP 6 live workspace limit (429 + Retry-After + hint), spoofed XFF resistance, and schema 120/min limit', async () => {
     const rlCfg = loadConfig({
       ...process.env,
       LOG_LEVEL: 'silent',
@@ -226,8 +226,8 @@ describe('SQL Scratchpad M8-lite hostile corpus & hardening integration (real Ma
     const localWsIds: string[] = [];
 
     try {
-      // Create 3 workspaces from same IP (even while spoofing different X-Forwarded-For values)
-      for (let i = 0; i < 3; i += 1) {
+      // Create 6 workspaces from same IP (even while spoofing different X-Forwarded-For values)
+      for (let i = 0; i < 6; i += 1) {
         const res = await rlCtx.app.inject({
           method: 'POST',
           url: '/api/workspaces',
@@ -239,19 +239,19 @@ describe('SQL Scratchpad M8-lite hostile corpus & hardening integration (real Ma
         localWsIds.push((JSON.parse(res.body) as { wsId: string }).wsId);
       }
 
-      // 4th create from same IP (with spoofed X-Forwarded-For) -> 429 with friendly message + Retry-After
-      const fourth = await rlCtx.app.inject({
+      // 7th create from same IP (with spoofed X-Forwarded-For) -> 429 with friendly message + Retry-After
+      const seventh = await rlCtx.app.inject({
         method: 'POST',
         url: '/api/workspaces',
         remoteAddress: '198.51.100.50',
         headers: { 'x-forwarded-for': '203.0.113.250' },
         payload: { dataset: 'empty' },
       });
-      expect(fourth.statusCode).toBe(429);
-      expect(Number(fourth.headers['retry-after'])).toBeGreaterThan(0);
-      const fourthBody = JSON.parse(fourth.body) as { error: { code: string; message: string } };
-      expect(fourthBody.error.code).toBe('PER_IP_WORKSPACE_LIMIT');
-      expect(fourthBody.error.message.toLowerCase()).toContain(
+      expect(seventh.statusCode).toBe(429);
+      expect(Number(seventh.headers['retry-after'])).toBeGreaterThan(0);
+      const seventhBody = JSON.parse(seventh.body) as { error: { code: string; message: string } };
+      expect(seventhBody.error.code).toBe('PER_IP_WORKSPACE_LIMIT');
+      expect(seventhBody.error.message.toLowerCase()).toContain(
         'close a workspace or wait for it to expire',
       );
 
@@ -566,7 +566,7 @@ describe('SQL Scratchpad M8-lite hostile corpus & hardening integration (real Ma
     await assertCanaryHealthy(bystander.wsId);
   });
 
-  it('F1: shares 3-workspace cap within same IPv6 /64 and between plain IPv4 and IPv4-mapped IPv6, but isolates different /64s', async () => {
+  it('F1: shares 6-workspace cap within same IPv6 /64 and between plain IPv4 and IPv4-mapped IPv6, but isolates different /64s', async () => {
     const rlCfg = loadConfig({
       ...process.env,
       LOG_LEVEL: 'silent',
@@ -584,6 +584,9 @@ describe('SQL Scratchpad M8-lite hostile corpus & hardening integration (real Ma
         '2001:db8:abcd:1234::1',
         '2001:db8:abcd:1234::2',
         '2001:db8:abcd:1234::3',
+        '2001:db8:abcd:1234::4',
+        '2001:db8:abcd:1234::5',
+        '2001:db8:abcd:1234::6',
       ]) {
         const res = await rlCtx.app.inject({
           method: 'POST',
@@ -596,7 +599,7 @@ describe('SQL Scratchpad M8-lite hostile corpus & hardening integration (real Ma
         localWsIds.push((JSON.parse(res.body) as { wsId: string }).wsId);
       }
 
-      // 4th create from another host in the SAME /64 must hit 429 PER_IP_WORKSPACE_LIMIT
+      // 7th create from another host in the SAME /64 must hit 429 PER_IP_WORKSPACE_LIMIT
       const same64Blocked = await rlCtx.app.inject({
         method: 'POST',
         url: '/api/workspaces',
@@ -621,8 +624,15 @@ describe('SQL Scratchpad M8-lite hostile corpus & hardening integration (real Ma
       expect(diff64Ok.statusCode).toBe(201);
       localWsIds.push((JSON.parse(diff64Ok.body) as { wsId: string }).wsId);
 
-      // Plain IPv4 + IPv4-mapped IPv6 share one 3-workspace cap
-      for (const addr of ['203.0.113.88', '::ffff:203.0.113.88', '203.0.113.88']) {
+      // Plain IPv4 + IPv4-mapped IPv6 share one 6-workspace cap
+      for (const addr of [
+        '203.0.113.88',
+        '::ffff:203.0.113.88',
+        '203.0.113.88',
+        '::ffff:203.0.113.88',
+        '203.0.113.88',
+        '::ffff:203.0.113.88',
+      ]) {
         const res = await rlCtx.app.inject({
           method: 'POST',
           url: '/api/workspaces',
@@ -741,7 +751,7 @@ describe('SQL Scratchpad M8-lite hostile corpus & hardening integration (real Ma
     }
   });
 
-  it('F3: rotating the daily log salt does not reset the 3-workspace per-IP cap', async () => {
+  it('F3: rotating the daily log salt does not reset the 6-workspace per-IP cap', async () => {
     const day1 = new Date('2026-11-19T23:59:00Z');
     const day2 = new Date('2026-11-20T00:01:00Z');
     const ipHasher = new IpHasher(day1);
@@ -761,7 +771,7 @@ describe('SQL Scratchpad M8-lite hostile corpus & hardening integration (real Ma
     try {
       const logHashBefore = ipHasher.hash('198.51.100.70', day1);
 
-      for (let i = 0; i < 3; i += 1) {
+      for (let i = 0; i < 6; i += 1) {
         const res = await rlCtx.app.inject({
           method: 'POST',
           url: '/api/workspaces',
@@ -776,16 +786,16 @@ describe('SQL Scratchpad M8-lite hostile corpus & hardening integration (real Ma
       const logHashAfter = ipHasher.hash('198.51.100.70', day2);
       expect(logHashAfter).not.toBe(logHashBefore);
 
-      // 4th create from the SAME IP must still hit the 3-workspace cap
-      const fourthAfterRotation = await rlCtx.app.inject({
+      // 7th create from the SAME IP must still hit the 6-workspace cap
+      const seventhAfterRotation = await rlCtx.app.inject({
         method: 'POST',
         url: '/api/workspaces',
         remoteAddress: '198.51.100.70',
         payload: { dataset: 'empty' },
       });
-      expect(fourthAfterRotation.statusCode).toBe(429);
-      expect(Number(fourthAfterRotation.headers['retry-after'])).toBeGreaterThan(0);
-      expect(JSON.parse(fourthAfterRotation.body)).toMatchObject({
+      expect(seventhAfterRotation.statusCode).toBe(429);
+      expect(Number(seventhAfterRotation.headers['retry-after'])).toBeGreaterThan(0);
+      expect(JSON.parse(seventhAfterRotation.body)).toMatchObject({
         error: { code: 'PER_IP_WORKSPACE_LIMIT' },
       });
     } finally {
@@ -974,6 +984,117 @@ describe('SQL Scratchpad M8-lite hostile corpus & hardening integration (real Ma
         await janCtx.app.inject({ method: 'DELETE', url: `/api/workspaces/${janWsId}` });
       }
       await janCtx.app.close();
+    }
+  });
+
+  it('POST /api/workspaces/:wsId/close enforces IP-key ownership, accepts beacon-style empty/text POST, frees cap slots, and rate-limits at 60/min', async () => {
+    const rlCfg = loadConfig({
+      ...process.env,
+      LOG_LEVEL: 'silent',
+      TRUST_PROXY: '10.0.0.1',
+    });
+    const rlCtx = await buildApp({
+      config: rlCfg,
+      adminPool: ctx.adminPool,
+      enableRateLimit: true,
+    });
+    const localWsIds: string[] = [];
+
+    try {
+      // Fill all 6 slots for owner IP 198.51.100.90
+      for (let i = 0; i < 6; i += 1) {
+        const res = await rlCtx.app.inject({
+          method: 'POST',
+          url: '/api/workspaces',
+          remoteAddress: '10.0.0.1',
+          headers: { 'x-forwarded-for': '198.51.100.90' },
+          payload: { dataset: 'empty' },
+        });
+        expect(res.statusCode).toBe(201);
+        localWsIds.push((JSON.parse(res.body) as { wsId: string }).wsId);
+      }
+
+      const targetWsId = localWsIds[0]!;
+      const secondWsId = localWsIds[1]!;
+
+      // Non-owner IP MUST be rejected with 403 and workspace must stay alive
+      const nonOwnerClose = await rlCtx.app.inject({
+        method: 'POST',
+        url: `/api/workspaces/${targetWsId}/close`,
+        remoteAddress: '10.0.0.1',
+        headers: { 'x-forwarded-for': '198.51.100.99' },
+      });
+      expect(nonOwnerClose.statusCode).toBe(403);
+      expect(JSON.parse(nonOwnerClose.body)).toMatchObject({
+        error: { code: 'FORBIDDEN' },
+      });
+      expect(rlCtx.workspaceManager.getWorkspace(targetWsId).wsId).toBe(targetWsId);
+
+      // Owner IP closing with beacon-style empty POST succeeds (200) and frees a slot
+      const ownerClose = await rlCtx.app.inject({
+        method: 'POST',
+        url: `/api/workspaces/${targetWsId}/close`,
+        remoteAddress: '10.0.0.1',
+        headers: { 'x-forwarded-for': '198.51.100.90' },
+      });
+      expect(ownerClose.statusCode).toBe(200);
+      expect(JSON.parse(ownerClose.body)).toEqual({ ok: true });
+      localWsIds.shift();
+
+      // IPv4-mapped IPv6 of same owner IP with text/plain body also succeeds
+      const mappedOwnerClose = await rlCtx.app.inject({
+        method: 'POST',
+        url: `/api/workspaces/${secondWsId}/close`,
+        remoteAddress: '10.0.0.1',
+        headers: {
+          'x-forwarded-for': '::ffff:198.51.100.90',
+          'content-type': 'text/plain;charset=UTF-8',
+        },
+        payload: '',
+      });
+      expect(mappedOwnerClose.statusCode).toBe(200);
+      expect(JSON.parse(mappedOwnerClose.body)).toEqual({ ok: true });
+      localWsIds.shift();
+
+      // Freed slot allows creating a replacement workspace
+      const replacement = await rlCtx.app.inject({
+        method: 'POST',
+        url: '/api/workspaces',
+        remoteAddress: '10.0.0.1',
+        headers: { 'x-forwarded-for': '198.51.100.90' },
+        payload: { dataset: 'empty' },
+      });
+      expect(replacement.statusCode).toBe(201);
+      localWsIds.push((JSON.parse(replacement.body) as { wsId: string }).wsId);
+
+      // Rate-limited at 60/min like DELETE
+      for (let i = 0; i < 60; i += 1) {
+        const res = await rlCtx.app.inject({
+          method: 'POST',
+          url: '/api/workspaces/aaaaaaaaaaaaaaaaaaaaaaaaaa/close',
+          remoteAddress: '10.0.0.1',
+          headers: { 'x-forwarded-for': '198.51.100.95' },
+        });
+        expect(res.statusCode).toBe(404);
+      }
+      const close61 = await rlCtx.app.inject({
+        method: 'POST',
+        url: '/api/workspaces/aaaaaaaaaaaaaaaaaaaaaaaaaa/close',
+        remoteAddress: '10.0.0.1',
+        headers: { 'x-forwarded-for': '198.51.100.95' },
+      });
+      expect(close61.statusCode).toBe(429);
+      expect(Number(close61.headers['retry-after'])).toBeGreaterThan(0);
+    } finally {
+      for (const id of localWsIds) {
+        await rlCtx.app.inject({
+          method: 'DELETE',
+          url: `/api/workspaces/${id}`,
+          remoteAddress: '10.0.0.1',
+          headers: { 'x-forwarded-for': '198.51.100.98' },
+        });
+      }
+      await rlCtx.app.close();
     }
   });
 });

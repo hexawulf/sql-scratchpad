@@ -499,10 +499,21 @@ export class WorkspaceManager {
     }
   }
 
-  async deleteWorkspace(wsId: string, timeoutMs = DEFAULT_TEARDOWN_TIMEOUT_MS): Promise<void> {
+  async deleteWorkspace(
+    wsId: string,
+    timeoutMs = DEFAULT_TEARDOWN_TIMEOUT_MS,
+    expectedOwnerIpHash?: string,
+  ): Promise<void> {
     const ws = this.workspaces.get(wsId);
     if (!ws || ws.deleting) {
       throw new ApiError(404, 'WORKSPACE_NOT_FOUND', 'Workspace not found or expired');
+    }
+    if (
+      expectedOwnerIpHash !== undefined &&
+      ws.ownerIpHash &&
+      ws.ownerIpHash !== expectedOwnerIpHash
+    ) {
+      throw new ApiError(403, 'FORBIDDEN', 'Workspace does not belong to this client');
     }
     if (ws.teardownActive) {
       throw new ApiError(409, 'WORKSPACE_BUSY', 'Workspace is currently resetting');

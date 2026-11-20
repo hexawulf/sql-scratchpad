@@ -65,7 +65,9 @@ test.describe('SQL Scratchpad public app acceptance flows', () => {
     await page.getByTestId('run-btn').click();
     await expect(page.getByTestId('status-log')).toContainText('Query finished in');
     await expect(page.getByTestId('row-count-summary')).toContainText('Total rows loaded: 12');
-    await expect(page.getByTestId('result-grid')).toContainText('Foundations of Relational Storage');
+    await expect(page.getByTestId('result-grid')).toContainText(
+      'Foundations of Relational Storage',
+    );
   });
 
   test('syntax error highlights the failing line in the editor and logs ERROR in status log', async ({
@@ -94,7 +96,7 @@ test.describe('SQL Scratchpad public app acceptance flows', () => {
       name: 'demo.sql',
       mimeType: 'application/sql',
       buffer: Buffer.from(
-        'CREATE TABLE notes (id INT PRIMARY KEY, body VARCHAR(80));\nINSERT INTO notes VALUES (1, \'imported\');\n',
+        "CREATE TABLE notes (id INT PRIMARY KEY, body VARCHAR(80));\nINSERT INTO notes VALUES (1, 'imported');\n",
       ),
     });
 
@@ -104,6 +106,43 @@ test.describe('SQL Scratchpad public app acceptance flows', () => {
     await expect(page.getByTestId('import-summary-card')).toContainText('demo.sql');
     await expect(page.getByTestId('schema-tree')).toContainText('notes');
     expect(pageCreatedCount).toBe(1);
+  });
+
+  test('importing a query-only .sql script into empty shows notice, executes nothing, and opens in editor', async ({
+    page,
+  }) => {
+    let importRequests = 0;
+    page.on('request', (req) => {
+      if (req.method() === 'POST' && new URL(req.url()).pathname.endsWith('/import')) {
+        importRequests += 1;
+      }
+    });
+
+    await page.goto('/');
+    await page.getByTestId('welcome-empty-btn').click();
+    await expect(page.getByTestId('status-log')).toContainText('Database reset to dataset "empty"');
+    await expect(page.getByTestId('dataset-select')).toHaveValue('empty');
+    await expect(page.getByTestId('import-btn')).toBeEnabled();
+
+    await page.getByTestId('import-file-input').setInputFiles({
+      name: 'unit2_select.sql',
+      mimeType: 'application/sql',
+      buffer: Buffer.from(
+        '-- 1 -- After explanation of select and from\n-- select all rows\nSELECT *\nFROM Country;\nSELECT DISTINCT continent FROM Country;\n',
+      ),
+    });
+
+    await expect(page.getByTestId('import-modal')).toBeVisible();
+    await expect(page.getByTestId('import-query-only-notice')).toBeVisible();
+    await expect(page.getByTestId('import-open-editor-btn')).toBeVisible();
+    await expect(page.getByTestId('import-anyway-btn')).toBeVisible();
+    expect(importRequests).toBe(0);
+
+    await page.getByTestId('import-open-editor-btn').click();
+    await expect(page.getByTestId('import-modal')).toBeHidden();
+    await expect(page.getByTestId('tab-bar')).toContainText('unit2_select.sql');
+    await expect(page.locator('[data-testid="sql-editor"] .cm-content')).toContainText('SELECT *');
+    expect(importRequests).toBe(0);
   });
 
   test('reload restores tabs and execution history from sql-scratchpad:v1', async ({ page }) => {

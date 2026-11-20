@@ -103,34 +103,75 @@ export function stripCommentsAndLiterals(sql: string): string {
   return out;
 }
 
+/**
+ * Strip leading whitespace (including UTF-8 BOM) and non-conditional comments
+ * (`--`, `#`, `/* ... *\/`) while preserving executable conditional comments
+ * (`/*! ... *\/`) and counting the exact number of skipped newlines.
+ */
+export function stripLeadingNonConditionalComments(sql: string): {
+  sql: string;
+  skippedNewlines: number;
+} {
+  let i = 0;
+  let skippedNewlines = 0;
+  const n = sql.length;
+
+  while (i < n) {
+    while (i < n && /\s/.test(sql[i]!)) {
+      if (sql[i] === '\n') skippedNewlines += 1;
+      i += 1;
+    }
+    if (i >= n) break;
+
+    const ch = sql[i]!;
+    const next = i + 1 < n ? sql[i + 1] : '';
+
+    if (ch === '-' && next === '-' && (i + 2 >= n || /\s/.test(sql[i + 2]!))) {
+      i += 2;
+      while (i < n && sql[i] !== '\n') i += 1;
+      continue;
+    }
+    if (ch === '#') {
+      i += 1;
+      while (i < n && sql[i] !== '\n') i += 1;
+      continue;
+    }
+    if (ch === '/' && next === '*' && sql[i + 2] !== '!') {
+      i += 2;
+      while (i < n && !(sql[i] === '*' && i + 1 < n && sql[i + 1] === '/')) {
+        if (sql[i] === '\n') skippedNewlines += 1;
+        i += 1;
+      }
+      i += 2;
+      continue;
+    }
+
+    break;
+  }
+
+  return { sql: sql.slice(i).trim(), skippedNewlines };
+}
+
 export function splitMariaDbStatements(sql: string): SplitStatement[] {
-  const items = splitQuery(sql, {
+  // Strip UTF-8 BOM before splitting so dbgate-query-splitter does not treat it
+  // as a data token on line 1 (which would break line-1 DELIMITER directives).
+  const normalized = sql.charCodeAt(0) === 0xfeff ? sql.slice(1) : sql;
+  const items = splitQuery(normalized, {
     ...mysqlSplitterOptions,
     returnRichInfo: true,
   }) as RichSplitItem[];
 
   const result: SplitStatement[] = [];
   for (const item of items) {
-    const trimmed = item.text.trim();
-    if (!trimmed) continue;
+    const { sql: cleanedSql, skippedNewlines } = stripLeadingNonConditionalComments(item.text);
+    if (!cleanedSql) continue;
 
     // Skip pure-comment chunks
-    const stripped = stripCommentsAndLiterals(trimmed).trim();
+    const stripped = stripCommentsAndLiterals(cleanedSql).trim();
     if (!stripped) continue;
 
-    // Advance startLine past leading comment-only lines inside the chunk
-    let startLine = item.trimStart.line + 1;
-    const lines = item.text.split('\n');
-    for (const line of lines) {
-      const t = line.trim();
-      if (t === '' || t.startsWith('--') || t.startsWith('#')) {
-        startLine += 1;
-      } else {
-        break;
-      }
-    }
-
-    result.push({ sql: trimmed, startLine });
+    const startLine = item.trimStart.line + 1 + skippedNewlines;
+    result.push({ sql: cleanedSql, startLine });
   }
   return result;
 }
@@ -343,8 +384,7 @@ export class ExecEngine {
             sql: stmt.sql,
             rowsAsArray: true,
           });
-          const durationMs =
-            Math.round((Number(process.hrtime.bigint() - t0) / 1e6) * 1000) / 1000;
+          const durationMs = Math.round((Number(process.hrtime.bigint() - t0) / 1e6) * 1000) / 1000;
 
           if (Array.isArray(raw)) {
             const columns: ColumnMeta[] = (fields ?? []).map((f) => ({
@@ -406,8 +446,7 @@ export class ExecEngine {
             results.push(stmtRes);
           }
         } catch (err) {
-          const durationMs =
-            Math.round((Number(process.hrtime.bigint() - t0) / 1e6) * 1000) / 1000;
+          const durationMs = Math.round((Number(process.hrtime.bigint() - t0) / 1e6) * 1000) / 1000;
           const mysqlErr = err as {
             code?: string;
             errno?: number;

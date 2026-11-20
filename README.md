@@ -28,10 +28,12 @@
 Use **Open** to load a `.sql` file into an editor tab, or **Import .sql…** (or drag and drop a `.sql` file onto the schema tree) to populate a workspace database directly:
 
 - Choose **Fresh workspace** (resets to an empty database first) or **Add to current**.
+- Detects read-only query scripts (files containing only `SELECT`/`WITH…SELECT`/`SHOW`/`EXPLAIN`/`DESCRIBE` or comments with no DDL/DML) before executing and offers **Open in editor** (or **Import anyway**).
 - Runs strictly under the workspace's own unprivileged MariaDB user (never as admin), keeping all isolation and statement-time limits active.
-- Supports `DELIMITER` blocks for triggers and stored routines.
+- Supports `DELIMITER` blocks for triggers and stored routines (including UTF-8 BOM files).
 - Automatically skips non-applicable dump headers (`CREATE DATABASE`, `USE`, `DROP DATABASE`, `SET GLOBAL`, `LOCK/UNLOCK TABLES`, and session/charset `/*!40101 SET … */` / `DISABLE KEYS` headers) while executing real conditional-comment DDL (`/*!50001 CREATE … VIEW */`, `/*!50003 CREATE TRIGGER */`).
 - Automatically strips `DEFINER=<user>@<host>` and `SQL SECURITY DEFINER` from imported views, triggers, procedures, functions, and events and reports every skipped or rewritten statement in the summary.
+- Surfaces contextual dataset hints on `ER_NO_SUCH_TABLE` (1146) import errors and offers an **Open in editor** button on failed imports (≤ 256 KB).
 
 ## Privacy
 

@@ -393,32 +393,26 @@ describe('SQL Scratchpad API integration (real MariaDB 11.4)', () => {
     expect(tree.tables).toEqual([]);
   });
 
-  it(
-    'imports a 20,000-statement generated script in under 75 s on the workspace user',
-    async () => {
-      const { wsId } = await createWs('empty');
+  it('imports a 20,000-statement generated script in under 75 s on the workspace user', async () => {
+    const { wsId } = await createWs('empty');
 
-      const lines = [
-        'CREATE TABLE bulk_items (id INTEGER PRIMARY KEY, label VARCHAR(40) NOT NULL);',
-      ];
-      for (let i = 1; i <= 19_999; i += 1) {
-        lines.push(`INSERT INTO bulk_items (id, label) VALUES (${i}, 'item_${i}');`);
-      }
+    const lines = ['CREATE TABLE bulk_items (id INTEGER PRIMARY KEY, label VARCHAR(40) NOT NULL);'];
+    for (let i = 1; i <= 19_999; i += 1) {
+      lines.push(`INSERT INTO bulk_items (id, label) VALUES (${i}, 'item_${i}');`);
+    }
 
-      const { statusCode, body } = await importSql(wsId, lines.join('\n'), 'fresh');
-      expect(statusCode).toBe(200);
-      expect(body.ok).toBe(true);
-      expect(body.totalStatements).toBe(20_000);
-      expect(body.statementsRun).toBe(20_000);
-      expect(body.statementsOk).toBe(20_000);
-      expect(body.durationMs).toBeLessThan(75_000);
-      expect(body.tablesCreated).toEqual(['bulk_items']);
+    const { statusCode, body } = await importSql(wsId, lines.join('\n'), 'fresh');
+    expect(statusCode).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.totalStatements).toBe(20_000);
+    expect(body.statementsRun).toBe(20_000);
+    expect(body.statementsOk).toBe(20_000);
+    expect(body.durationMs).toBeLessThan(75_000);
+    expect(body.tablesCreated).toEqual(['bulk_items']);
 
-      const cnt = await execSql(wsId, 'SELECT COUNT(*) FROM bulk_items;');
-      expect(cnt.results[0]?.rows).toEqual([[19_999]]);
-    },
-    120_000,
-  );
+    const cnt = await execSql(wsId, 'SELECT COUNT(*) FROM bulk_items;');
+    expect(cnt.results[0]?.rows).toEqual([[19_999]]);
+  }, 120_000);
 
   it('imports synthetic mysqldump with selective conditional skips, DEFINER stripping, views, and triggers', async () => {
     const { wsId } = await createWs('empty');
@@ -493,11 +487,21 @@ describe('SQL Scratchpad API integration (real MariaDB 11.4)', () => {
       errno: 1146,
       alreadyApplied: true,
     });
+    expect(body.error?.hint).toContain("'empty'");
     expect(body.note).toContain('line 4');
     expect(body.note).toContain('remain applied');
 
     const cnt = await execSql(wsId, 'SELECT COUNT(*) FROM partial_rows;');
     expect(cnt.results[0]?.rows).toEqual([[2]]);
+
+    // Also verify 1146 hint when append fails on statement #1 against sample-library
+    const { wsId: libWsId } = await createWs('sample-library');
+    const libErr = await importSql(libWsId, 'SELECT * FROM Country;', 'append');
+    expect(libErr.statusCode).toBe(200);
+    expect(libErr.body.ok).toBe(false);
+    expect(libErr.body.error?.errno).toBe(1146);
+    expect(libErr.body.error?.hint).toContain("'sample-library'");
+    expect(libErr.body.error?.hint).toMatch(/editor/i);
   });
 
   it('enforces import transaction safety: refuses append with open tx (409) and restores @@autocommit', async () => {
@@ -639,5 +643,30 @@ describe('SQL Scratchpad API integration (real MariaDB 11.4)', () => {
     expect(JSON.parse(overCapRes.body)).toMatchObject({
       error: { code: 'TOO_MANY_STATEMENTS' },
     });
+
+    // ~5.9 MB raw SQL with many newlines and double-quotes expands past 6 MB in JSON
+    // envelope (< 7 MB) and must still be accepted
+    const { wsId: envelopeWs } = await createWs('empty');
+    const headerLine = 'CREATE TABLE big_text (id INT PRIMARY KEY, body LONGTEXT);\n';
+    const commentChunk = '-- "quoted" line with newline\n'; // 30 bytes raw, 33 bytes JSON-escaped (+10%)
+    const repeatCount = Math.floor((5.9 * 1024 * 1024 - headerLine.length) / commentChunk.length);
+    const near6MbSql = `${headerLine}${commentChunk.repeat(repeatCount)}INSERT INTO big_text VALUES (1, 'ok');\n`;
+    const rawBytes = Buffer.byteLength(near6MbSql, 'utf8');
+    const jsonPayload = JSON.stringify({ mode: 'fresh', sql: near6MbSql });
+    const jsonBytes = Buffer.byteLength(jsonPayload, 'utf8');
+    expect(rawBytes).toBeLessThan(6 * 1024 * 1024);
+    expect(jsonBytes).toBeGreaterThan(6 * 1024 * 1024);
+    expect(jsonBytes).toBeLessThan(7 * 1024 * 1024);
+
+    const near6MbRes = await ctx.app.inject({
+      method: 'POST',
+      url: `/api/workspaces/${envelopeWs}/import`,
+      headers: { 'content-type': 'application/json' },
+      payload: jsonPayload,
+    });
+    expect(near6MbRes.statusCode).toBe(200);
+    const near6MbBody = JSON.parse(near6MbRes.body) as ImportResponse;
+    expect(near6MbBody.ok).toBe(true);
+    expect(near6MbBody.tablesCreated).toEqual(['big_text']);
   });
 });

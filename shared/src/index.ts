@@ -171,6 +171,7 @@ export interface ImportErrorDetail {
   sqlState?: string;
   message: string;
   alreadyApplied: boolean;
+  hint?: string;
 }
 
 export interface ImportResponse {

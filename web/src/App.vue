@@ -28,7 +28,7 @@ import {
   loadPersistedState,
   savePersistedState,
 } from './utils/storage';
-import { containsDdlStatement } from './utils/sql-statement';
+import { containsDdlStatement, isQueryOnlyScript } from './utils/sql-statement';
 import {
   formatApiErrorForUser,
   formatDurationSeconds,
@@ -97,12 +97,22 @@ const resultTab = ref<'grid' | 'messages'>('grid');
 const settingsOpen = ref(false);
 const aboutOpen = ref(false);
 
+const MAX_IMPORT_BYTES = 6 * 1024 * 1024;
+const MAX_OPEN_IN_EDITOR_BYTES = 256 * 1024;
+
 const importFileInputRef = ref<HTMLInputElement | null>(null);
 const pendingImportFile = ref<File | null>(null);
+const pendingImportSql = ref<string | null>(null);
+const pendingImportQueryOnly = ref(false);
 const importModalOpen = ref(false);
 const importing = ref(false);
 const importModalError = ref<string | null>(null);
 const lastImportSummary = ref<ImportSummaryRecord | null>(null);
+
+const canOpenPendingInEditor = computed(() => {
+  const file = pendingImportFile.value;
+  return file !== null && file.size <= MAX_OPEN_IN_EDITOR_BYTES;
+});
 
 const running = ref(false);
 const txOpen = ref(false);
@@ -123,9 +133,7 @@ const activeTab = computed<EditorTab>(() => {
 });
 
 const rowResultSets = computed(() =>
-  lastResults.value
-    .map((res, idx) => ({ res, idx }))
-    .filter((item) => item.res.kind === 'rows'),
+  lastResults.value.map((res, idx) => ({ res, idx })).filter((item) => item.res.kind === 'rows'),
 );
 
 const activeResult = computed<StatementResult | null>(() => {
@@ -238,10 +246,7 @@ async function bootstrap(): Promise<void> {
 
   try {
     datasets.value = await adapter.fetchDatasets();
-    if (
-      datasets.value.length > 0 &&
-      !datasets.value.some((d) => d.id === currentDataset.value)
-    ) {
+    if (datasets.value.length > 0 && !datasets.value.some((d) => d.id === currentDataset.value)) {
       currentDataset.value = datasets.value.some((d) => d.id === 'empty')
         ? 'empty'
         : datasets.value[0]!.id;
@@ -341,6 +346,7 @@ async function executeSql(
 
     txOpen.value = response.txOpen;
     lastResults.value = response.results;
+    lastImportSummary.value = null;
     showWelcome.value = false;
 
     for (const res of response.results) {
@@ -463,15 +469,58 @@ function handleImportInputChange(event: Event): void {
 function handleImportFileSelected(file: File): void {
   if (running.value || importing.value) return;
   pendingImportFile.value = file;
+  pendingImportSql.value = null;
+  pendingImportQueryOnly.value = false;
   importModalError.value = null;
   importModalOpen.value = true;
+
+  if (file.size <= MAX_IMPORT_BYTES) {
+    void file
+      .text()
+      .then((text) => {
+        if (pendingImportFile.value !== file) return;
+        pendingImportSql.value = text;
+        pendingImportQueryOnly.value = isQueryOnlyScript(text);
+      })
+      .catch(() => {
+        // Defer read errors to confirm/open action
+      });
+  }
 }
 
 function handleCloseImportModal(): void {
   if (importing.value) return;
   importModalOpen.value = false;
   pendingImportFile.value = null;
+  pendingImportSql.value = null;
+  pendingImportQueryOnly.value = false;
   importModalError.value = null;
+}
+
+function openSqlInEditorTab(fileName: string, content: string): void {
+  const tab: EditorTab = {
+    id: makeTabId(),
+    title: fileName,
+    sql: content,
+    cursor: 0,
+  };
+  tabs.value.push(tab);
+  activeTabId.value = tab.id;
+  editorTab.value = 'query';
+  showWelcome.value = false;
+  pushStatus(formatNoticeLine(`Opened ${fileName}.`, 'notice'));
+}
+
+async function handleOpenPendingImportInEditor(): Promise<void> {
+  const file = pendingImportFile.value;
+  if (!file || importing.value) return;
+  try {
+    const sqlText = pendingImportSql.value ?? (await file.text());
+    openSqlInEditorTab(file.name, sqlText);
+    handleCloseImportModal();
+  } catch (err) {
+    importModalError.value = (err as Error).message || `Failed to read ${file.name}`;
+  }
 }
 
 async function handleConfirmImport(mode: ImportMode): Promise<void> {
@@ -486,7 +535,7 @@ async function handleConfirmImport(mode: ImportMode): Promise<void> {
   errorLine.value = null;
 
   try {
-    const sqlText = await file.text();
+    const sqlText = pendingImportSql.value ?? (await file.text());
     const targetDataset = mode === 'fresh' ? 'empty' : currentDataset.value;
     if (!adapter.getWorkspaceId()) {
       await adapter.open(targetDataset);
@@ -510,7 +559,13 @@ async function handleConfirmImport(mode: ImportMode): Promise<void> {
     errorBanner.value = null;
     workspaceError.value = null;
 
-    lastImportSummary.value = { fileName: file.name, response };
+    const sqlBytes = new TextEncoder().encode(sqlText).length;
+    lastResults.value = [];
+    lastImportSummary.value = {
+      fileName: file.name,
+      response,
+      ...(!response.ok && sqlBytes <= MAX_OPEN_IN_EDITOR_BYTES ? { sqlText } : {}),
+    };
     showWelcome.value = false;
     resultTab.value = 'messages';
     txOpen.value = false;
@@ -541,6 +596,9 @@ async function handleConfirmImport(mode: ImportMode): Promise<void> {
           'error',
         ),
       );
+      if (response.error.hint) {
+        pushStatus(formatNoticeLine(response.error.hint, 'notice'));
+      }
       if (response.note) {
         pushStatus(formatNoticeLine(response.note, 'warning'));
       }
@@ -549,6 +607,8 @@ async function handleConfirmImport(mode: ImportMode): Promise<void> {
     await refreshSchema(false);
     importModalOpen.value = false;
     pendingImportFile.value = null;
+    pendingImportSql.value = null;
+    pendingImportQueryOnly.value = false;
   } catch (err) {
     const msg = surfaceApiError(`Import failed (${file.name})`, err, {
       workspaceFailed: !schema.value,
@@ -650,16 +710,7 @@ function handlePreviewTable(tableName: string): void {
 async function handleOpenFile(): Promise<void> {
   const file = await openSqlFile();
   if (!file) return;
-  const tab: EditorTab = {
-    id: makeTabId(),
-    title: file.name,
-    sql: file.content,
-    cursor: 0,
-  };
-  tabs.value.push(tab);
-  activeTabId.value = tab.id;
-  editorTab.value = 'query';
-  pushStatus(formatNoticeLine(`Opened ${file.name}.`, 'notice'));
+  openSqlInEditorTab(file.name, file.content);
 }
 
 async function handleSaveFile(): Promise<void> {
@@ -824,9 +875,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="toolbar-group toolbar-right">
-        <span v-if="txOpen" class="tx-badge" data-testid="tx-badge">
-          ● Transaction open (A)
-        </span>
+        <span v-if="txOpen" class="tx-badge" data-testid="tx-badge"> ● Transaction open (A) </span>
 
         <button
           type="button"
@@ -837,7 +886,12 @@ onBeforeUnmount(() => {
         >
           About
         </button>
-        <button type="button" class="tb-btn" title="Open .sql file in editor tab" @click="handleOpenFile">
+        <button
+          type="button"
+          class="tb-btn"
+          title="Open .sql file in editor tab"
+          @click="handleOpenFile"
+        >
           Open
         </button>
         <button
@@ -1039,7 +1093,9 @@ onBeforeUnmount(() => {
                       class="tb-select"
                       data-testid="result-switcher"
                       :value="selectedResultIdx"
-                      @change="selectedResultIdx = Number(($event.target as HTMLSelectElement).value)"
+                      @change="
+                        selectedResultIdx = Number(($event.target as HTMLSelectElement).value)
+                      "
                     >
                       <option
                         v-for="(item, pos) in rowResultSets"
@@ -1053,7 +1109,12 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="pane-body">
                   <div
-                    v-if="showWelcome && resultTab === 'grid' && lastResults.length === 0 && !lastImportSummary"
+                    v-if="
+                      showWelcome &&
+                      resultTab === 'grid' &&
+                      lastResults.length === 0 &&
+                      !lastImportSummary
+                    "
                     class="welcome-empty-state"
                     data-testid="welcome-empty-state"
                   >
@@ -1102,6 +1163,7 @@ onBeforeUnmount(() => {
                     v-else
                     :results="lastResults"
                     :import-summary="lastImportSummary"
+                    @open-in-editor="openSqlInEditorTab"
                   />
                 </div>
               </div>
@@ -1159,8 +1221,11 @@ onBeforeUnmount(() => {
       :file-size-bytes="pendingImportFile?.size ?? 0"
       :importing="importing"
       :error-message="importModalError"
+      :is-query-only="pendingImportQueryOnly"
+      :can-open-in-editor="canOpenPendingInEditor"
       @close="handleCloseImportModal"
       @confirm="handleConfirmImport"
+      @open-in-editor="handleOpenPendingImportInEditor"
     />
   </div>
 </template>

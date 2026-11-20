@@ -146,7 +146,9 @@ describe('Vue components', () => {
     expect(wrapper.text()).toContain(
       'SQL Scratchpad — a Letos-style SQL playground (MariaDB + SQLite)',
     );
-    expect(wrapper.get('[data-testid="about-version"]').text()).toContain('Version 0.3.3 · build testsha');
+    expect(wrapper.get('[data-testid="about-version"]').text()).toContain(
+      'Version 0.3.3 · build testsha',
+    );
     expect(wrapper.text()).toContain('Erling Wulf Weinreich (0xWulf)');
     expect(wrapper.text()).toContain('MariaDB, sql.js (SQLite), Vue 3, CodeMirror 6, Fastify');
     expect(wrapper.text()).toContain('Not affiliated with any university.');
@@ -174,7 +176,9 @@ describe('Vue components', () => {
     const closeBtn = wrapper.get('[data-testid="about-close-btn"]').element as HTMLElement;
     const lastLink = sisterLink.element as HTMLElement;
     closeBtn.focus();
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, cancelable: true }));
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, cancelable: true }),
+    );
     expect(document.activeElement).toBe(lastLink);
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', cancelable: true }));
@@ -222,6 +226,73 @@ describe('Vue components', () => {
     ).toBe(true);
   });
 
+  it('ImportModal shows query-only notice with Open in editor and Import anyway actions', async () => {
+    const wrapper = mount(ImportModal, {
+      props: {
+        open: true,
+        fileName: 'Unit2_Select.sql',
+        fileSizeBytes: 512,
+        importing: false,
+        errorMessage: null,
+        isQueryOnly: true,
+        canOpenInEditor: true,
+      },
+    });
+
+    expect(wrapper.get('[data-testid="import-query-only-notice"]').text()).toMatch(
+      /query script|read-only/i,
+    );
+    await wrapper.get('[data-testid="import-open-editor-btn"]').trigger('click');
+    expect(wrapper.emitted('open-in-editor')).toHaveLength(1);
+
+    await wrapper.get('[data-testid="import-anyway-btn"]').trigger('click');
+    expect(wrapper.emitted('confirm')).toEqual([['fresh']]);
+  });
+
+  it('MessagesPanel renders 1146 error hint and Open in editor button on failed import card', async () => {
+    const wrapper = mount(MessagesPanel, {
+      props: {
+        results: [],
+        importSummary: {
+          fileName: 'Unit2_Select.sql',
+          sqlText: 'SELECT * FROM Country;\n',
+          response: {
+            ok: false,
+            mode: 'append',
+            totalStatements: 1,
+            statementsRun: 1,
+            statementsOk: 0,
+            skippedCount: 0,
+            skipped: [],
+            rewrittenCount: 0,
+            rewritten: [],
+            warningsCount: 0,
+            durationMs: 3.1,
+            tablesCreated: [],
+            error: {
+              index: 0,
+              startLine: 3,
+              code: 'ER_NO_SUCH_TABLE',
+              errno: 1146,
+              sqlState: '42S02',
+              message: "Table 'ws_abc.Country' doesn't exist",
+              alreadyApplied: false,
+              hint: "Current dataset is 'empty'. This script references a table that doesn't exist — it may be a query script. Open it in an editor tab instead, or import the schema script first.",
+            },
+          },
+        },
+      },
+    });
+
+    expect(wrapper.get('[data-testid="import-error-hint"]').text()).toContain(
+      "Current dataset is 'empty'",
+    );
+    await wrapper.get('[data-testid="import-error-open-editor-btn"]').trigger('click');
+    expect(wrapper.emitted('open-in-editor')).toEqual([
+      ['Unit2_Select.sql', 'SELECT * FROM Country;\n'],
+    ]);
+  });
+
   it('MessagesPanel renders import summary with skipped and rewritten counts', () => {
     const wrapper = mount(MessagesPanel, {
       props: {
@@ -267,7 +338,8 @@ describe('Vue components', () => {
       props: {
         schema: null,
         loading: false,
-        error: 'You have reached the maximum of 6 active workspaces per IP. Please try again in 120 minutes.',
+        error:
+          'You have reached the maximum of 6 active workspaces per IP. Please try again in 120 minutes.',
       },
     });
     expect(wrapper.get('[data-testid="schema-tree-error"]').text()).toContain(
@@ -321,7 +393,13 @@ describe('App workspace lifecycle and 429/503 error UX', () => {
       }
       if (url === '/api/datasets') {
         return makeJsonResponse(200, [
-          { id: 'sample-library', title: 'Sample: Library', description: '', tables: [], engines: ['mariadb'] },
+          {
+            id: 'sample-library',
+            title: 'Sample: Library',
+            description: '',
+            tables: [],
+            engines: ['mariadb'],
+          },
           { id: 'empty', title: 'Empty', description: '', tables: [], engines: ['mariadb'] },
         ]);
       }
@@ -363,7 +441,9 @@ describe('App workspace lifecycle and 429/503 error UX', () => {
 
     // Schema tree shows the error rather than falling back silently to "No workspace connected."
     const tree = wrapper.get('[data-testid="schema-tree"]');
-    expect(tree.get('[data-testid="schema-tree-error"]').text()).toContain('try again in 120 minutes');
+    expect(tree.get('[data-testid="schema-tree-error"]').text()).toContain(
+      'try again in 120 minutes',
+    );
     expect(tree.text()).not.toContain('No workspace connected.');
 
     wrapper.unmount();
@@ -383,7 +463,13 @@ describe('App workspace lifecycle and 429/503 error UX', () => {
       }
       if (url === '/api/datasets') {
         return makeJsonResponse(200, [
-          { id: 'sample-library', title: 'Sample: Library', description: '', tables: [], engines: ['mariadb'] },
+          {
+            id: 'sample-library',
+            title: 'Sample: Library',
+            description: '',
+            tables: [],
+            engines: ['mariadb'],
+          },
           { id: 'empty', title: 'Empty', description: '', tables: [], engines: ['mariadb'] },
         ]);
       }
@@ -408,7 +494,12 @@ describe('App workspace lifecycle and 429/503 error UX', () => {
       if (url === '/api/workspaces/wsreuse123456/exec' && method === 'POST') {
         return makeJsonResponse(
           503,
-          { error: { code: 'WORKSPACE_LIMIT_REACHED', message: 'SQL Scratchpad is busy, try again in a few minutes' } },
+          {
+            error: {
+              code: 'WORKSPACE_LIMIT_REACHED',
+              message: 'SQL Scratchpad is busy, try again in a few minutes',
+            },
+          },
           { 'retry-after': '180' },
         );
       }
@@ -450,6 +541,143 @@ describe('App workspace lifecycle and 429/503 error UX', () => {
     // pagehide frees slot via navigator.sendBeacon to /api/workspaces/:wsId/close
     window.dispatchEvent(new Event('pagehide'));
     expect(beaconSpy).toHaveBeenCalledWith('/api/workspaces/wsreuse123456/close');
+
+    wrapper.unmount();
+  });
+
+  it('clears the previous Messages card when alternating between Run and Import, and opens query-only file in editor without calling /import', async () => {
+    window.localStorage.clear();
+
+    const calls: Array<{ method: string; url: string }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      calls.push({ method, url });
+
+      if (url === '/api/health') {
+        return makeJsonResponse(200, { status: 'ok', db: 'ok', version: '0.3.3' });
+      }
+      if (url === '/api/datasets') {
+        return makeJsonResponse(200, [
+          {
+            id: 'sample-library',
+            title: 'Sample: Library',
+            description: '',
+            tables: [],
+            engines: ['mariadb'],
+          },
+          { id: 'empty', title: 'Empty', description: '', tables: [], engines: ['mariadb'] },
+        ]);
+      }
+      if (url === '/api/workspaces' && method === 'POST') {
+        return makeJsonResponse(201, {
+          wsId: 'wsmsgclear123',
+          database: 'ws_aabbccddeeff',
+          expiresAt: '2026-11-20T12:00:00.000Z',
+        });
+      }
+      if (url === '/api/workspaces/wsmsgclear123/schema' && method === 'GET') {
+        return makeJsonResponse(200, {
+          database: 'ws_aabbccddeeff',
+          engine: 'mariadb',
+          tables: [],
+          views: [],
+        });
+      }
+      if (url === '/api/workspaces/wsmsgclear123/exec' && method === 'POST') {
+        return makeJsonResponse(200, {
+          results: [
+            {
+              index: 0,
+              sql: 'SELECT * FROM Country',
+              startLine: 1,
+              kind: 'error',
+              error: {
+                code: 'ER_NO_SUCH_TABLE',
+                errno: 1146,
+                sqlState: '42S02',
+                message: "Table 'ws_aabbccddeeff.Country' doesn't exist",
+              },
+              durationMs: 1.5,
+            },
+          ],
+          txOpen: false,
+        });
+      }
+      if (url === '/api/workspaces/wsmsgclear123/import' && method === 'POST') {
+        return makeJsonResponse(200, {
+          ok: true,
+          mode: 'fresh',
+          totalStatements: 1,
+          statementsRun: 1,
+          statementsOk: 1,
+          skippedCount: 0,
+          skipped: [],
+          rewrittenCount: 0,
+          rewritten: [],
+          warningsCount: 0,
+          durationMs: 4.2,
+          tablesCreated: ['notes'],
+        });
+      }
+      return makeJsonResponse(404, { error: { code: 'NOT_FOUND', message: 'Not found' } });
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const wrapper = mount(App, {
+      global: {
+        stubs: { SqlEditor: SqlEditorStub },
+      },
+    });
+    await flushPromises();
+
+    // 1. Selecting a query-only file shows query-only notice; clicking Open in editor loads tab & never hits /import
+    const queryFile = new File(['-- lesson\nSELECT * FROM Country;\n'], 'lesson.sql', {
+      type: 'application/sql',
+    });
+    const fileInput = wrapper.get('[data-testid="import-file-input"]').element as HTMLInputElement;
+    Object.defineProperty(fileInput, 'files', { value: [queryFile], configurable: true });
+    await wrapper.get('[data-testid="import-file-input"]').trigger('change');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="import-query-only-notice"]').exists()).toBe(true);
+    await wrapper.get('[data-testid="import-open-editor-btn"]').trigger('click');
+    await flushPromises();
+
+    expect(calls.filter((c) => c.url.endsWith('/import'))).toHaveLength(0);
+    expect(wrapper.get('[data-testid="tab-bar"]').text()).toContain('lesson.sql');
+
+    // 2. Run script -> Messages shows only the Run result card (no import card)
+    await wrapper.get('[data-testid="run-btn"]').trigger('click');
+    await flushPromises();
+
+    let messagesPanel = wrapper.get('[data-testid="messages-panel"]');
+    expect(messagesPanel.find('[data-testid="import-summary-card"]').exists()).toBe(false);
+    expect(messagesPanel.text()).toContain("Table 'ws_aabbccddeeff.Country' doesn't exist");
+
+    // 3. Import a real DDL file -> Messages shows ONLY the Import summary card (previous Run card cleared)
+    const ddlFile = new File(['CREATE TABLE notes (id INT PRIMARY KEY);\n'], 'schema.sql', {
+      type: 'application/sql',
+    });
+    Object.defineProperty(fileInput, 'files', { value: [ddlFile], configurable: true });
+    await wrapper.get('[data-testid="import-file-input"]').trigger('change');
+    await flushPromises();
+
+    await wrapper.get('[data-testid="import-confirm-btn"]').trigger('click');
+    await flushPromises();
+
+    messagesPanel = wrapper.get('[data-testid="messages-panel"]');
+    expect(messagesPanel.find('[data-testid="import-summary-card"]').exists()).toBe(true);
+    expect(messagesPanel.text()).not.toContain("Table 'ws_aabbccddeeff.Country' doesn't exist");
+
+    // 4. Run again -> previous Import summary card is cleared
+    await wrapper.get('[data-testid="run-btn"]').trigger('click');
+    await flushPromises();
+
+    messagesPanel = wrapper.get('[data-testid="messages-panel"]');
+    expect(messagesPanel.find('[data-testid="import-summary-card"]').exists()).toBe(false);
+    expect(messagesPanel.text()).toContain("Table 'ws_aabbccddeeff.Country' doesn't exist");
 
     wrapper.unmount();
   });

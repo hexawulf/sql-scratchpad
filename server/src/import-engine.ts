@@ -8,11 +8,7 @@ import type {
 } from '@sql-scratchpad/shared';
 import type { AppConfig } from './config.js';
 import { ApiError } from './errors.js';
-import {
-  checkDenylist,
-  splitMariaDbStatements,
-  stripCommentsAndLiterals,
-} from './exec-engine.js';
+import { checkDenylist, splitMariaDbStatements, stripCommentsAndLiterals } from './exec-engine.js';
 import type { WorkspaceManager } from './workspace-manager.js';
 
 const MAX_REPORTED_ITEMS = 100;
@@ -198,7 +194,9 @@ function isSkippableConditionalSet(innerSql: string): boolean {
  * executes as normal SQL.
  */
 export function classifyImportSkip(sql: string): string | null {
-  const leadStripped = stripLeadingComments(sql).replace(/;+\s*$/, '').trim();
+  const leadStripped = stripLeadingComments(sql)
+    .replace(/;+\s*$/, '')
+    .trim();
 
   // Check single conditional-comment statement: /*!NNNNN <inner> */
   const condMatch = /^\/\*!\d*\s+([\s\S]+?)\s*\*\/$/.exec(leadStripped);
@@ -233,11 +231,8 @@ export function classifyImportSkip(sql: string): string | null {
   return null;
 }
 
-const QUOTED_OR_IDENT = `(?:` +
-  '`(?:[^`]|``)*`' +
-  `|'(?:[^']|'')*'` +
-  `|"(?:[^"]|"")*"` +
-  `|[A-Za-z0-9_.%$-]+)`;
+const QUOTED_OR_IDENT =
+  `(?:` + '`(?:[^`]|``)*`' + `|'(?:[^']|'')*'` + `|"(?:[^"]|"")*"` + `|[A-Za-z0-9_.%$-]+)`;
 
 const CONDITIONAL_DEFINER_RE = new RegExp(
   `\\/\\*!\\d*\\s+DEFINER\\s*=\\s*(?:CURRENT_USER(?:\\s*\\(\\s*\\))?|${QUOTED_OR_IDENT}\\s*@\\s*${QUOTED_OR_IDENT})\\s*\\*\\/\\s*`,
@@ -308,6 +303,18 @@ export function rewriteDefinerClauses(sql: string): { sql: string; reason: strin
 function makeSnippet(sql: string): string {
   const flat = stripLeadingComments(sql).replace(/\s+/g, ' ').trim();
   return flat.length > 90 ? `${flat.slice(0, 90)}…` : flat;
+}
+
+export function buildImportErrorHint(
+  errno: number | undefined,
+  dataset: string,
+  alreadyApplied: boolean,
+): string | undefined {
+  if (errno !== 1146) return undefined;
+  if (!alreadyApplied) {
+    return `Current dataset is '${dataset}'. This script references a table that doesn't exist — it may be a query script. Open it in an editor tab instead, or import the schema script first.`;
+  }
+  return `Current dataset is '${dataset}'. This statement references a table that doesn't exist — check that the schema was imported in the right order or select the expected dataset first.`;
 }
 
 function isConnectionLostError(err: { code?: string; fatal?: boolean }): boolean {
@@ -523,6 +530,8 @@ export class ImportEngine {
             connectionBroken = true;
           }
 
+          const alreadyApplied = statementsOk > 0;
+          const hint = buildImportErrorHint(mysqlErr.errno, ws.dataset, alreadyApplied);
           importError = {
             index: i,
             startLine: stmt.startLine,
@@ -530,7 +539,8 @@ export class ImportEngine {
             errno: mysqlErr.errno,
             sqlState: mysqlErr.sqlState,
             message: mysqlErr.sqlMessage ?? mysqlErr.message ?? 'SQL import error',
-            alreadyApplied: statementsOk > 0,
+            alreadyApplied,
+            ...(hint ? { hint } : {}),
           };
           break;
         }
@@ -555,8 +565,7 @@ export class ImportEngine {
         }
       }
 
-      const durationMs =
-        Math.round((Number(process.hrtime.bigint() - tStart) / 1e6) * 1000) / 1000;
+      const durationMs = Math.round((Number(process.hrtime.bigint() - tStart) / 1e6) * 1000) / 1000;
 
       const note = importError
         ? importError.alreadyApplied

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { StatementResult } from '@sql-scratchpad/shared';
 import {
+  classifySqlScriptForImport,
   containsDdlStatement,
   extractStatementAtCursor,
+  isQueryOnlyScript,
   splitStatementsWithOffsets,
 } from './sql-statement';
 import { formatApiErrorForUser, formatStatementStatusLines } from './status-format';
@@ -54,6 +56,51 @@ describe('sql-statement utilities', () => {
     expect(containsDdlStatement([okDdl])).toBe(true);
     expect(containsDdlStatement([errDdl])).toBe(false);
     expect(containsDdlStatement([selectOnly])).toBe(false);
+  });
+
+  it('handles UTF-8 BOM in splitStatementsWithOffsets', () => {
+    const script = '\uFEFF-- header\r\nSELECT 1;\r\nSELECT 2;';
+    const chunks = splitStatementsWithOffsets(script);
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]?.sql).toBe('SELECT 1;');
+    expect(chunks[0]?.startLine).toBe(2);
+    expect(chunks[1]?.sql).toBe('SELECT 2;');
+    expect(chunks[1]?.startLine).toBe(3);
+  });
+
+  it('detects query-only scripts (SELECT, WITH...SELECT, SHOW, EXPLAIN, DESCRIBE, comments) vs DDL/DML scripts', () => {
+    const queryOnlySamples = [
+      '-- 1 -- lesson script\n-- select all rows\nSELECT *\nFROM Country;\nSELECT DISTINCT continent FROM Country;',
+      '\uFEFF-- CRLF + BOM\r\nSHOW TABLES;\r\nEXPLAIN SELECT 1;\r\nDESCRIBE Country;\r\nDESC Country;',
+      'WITH cte AS (SELECT 1 AS n) SELECT * FROM cte;',
+      'WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 5) SELECT * FROM seq;',
+      '(SELECT 1) UNION (SELECT 2);',
+      'USE world;\n/*!40101 SET NAMES utf8mb4 */;\nSELECT * FROM Country;',
+      '-- comments only\n/* block comment */\n# hash comment',
+      '   \n\r\n  ',
+    ];
+    for (const sql of queryOnlySamples) {
+      expect(isQueryOnlyScript(sql), sql).toBe(true);
+    }
+
+    const mutatingSamples = [
+      'CREATE TABLE items (id INT PRIMARY KEY);',
+      'INSERT INTO items VALUES (1);',
+      'UPDATE items SET id = 2 WHERE id = 1;',
+      'DELETE FROM items WHERE id = 2;',
+      'DROP TABLE IF EXISTS items;',
+      'ALTER TABLE items ADD COLUMN name VARCHAR(40);',
+      'CREATE TABLE items (id INT);\nSELECT * FROM items;',
+      '/*!50001 CREATE VIEW v AS SELECT 1 */;',
+      'DELIMITER //\nCREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET NEW.a = 1; END //\nDELIMITER ;',
+      'WITH doomed AS (SELECT 1 AS id) DELETE FROM items WHERE id IN (SELECT id FROM doomed);',
+    ];
+    for (const sql of mutatingSamples) {
+      expect(isQueryOnlyScript(sql), sql).toBe(false);
+    }
+
+    const emptyMeta = classifySqlScriptForImport('-- only comments\n');
+    expect(emptyMeta).toEqual({ statementCount: 0, isQueryOnly: true, isEmpty: true });
   });
 });
 

@@ -10,11 +10,14 @@ const props = defineProps<{
   fileSizeBytes: number;
   importing: boolean;
   errorMessage: string | null;
+  isQueryOnly?: boolean;
+  canOpenInEditor?: boolean;
 }>();
 
 const emit = defineEmits<{
   close: [];
   confirm: [mode: ImportMode];
+  'open-in-editor': [];
 }>();
 
 const mode = ref<ImportMode>('fresh');
@@ -88,6 +91,20 @@ onBeforeUnmount(() => {
           data.
         </p>
 
+        <div
+          v-if="isQueryOnly && !tooLarge"
+          class="query-only-notice"
+          role="status"
+          data-testid="import-query-only-notice"
+        >
+          <strong>This looks like a query script, not a schema/data dump.</strong>
+          <p>
+            No <code>CREATE</code>, <code>INSERT</code>, or other DDL/DML statements were detected
+            (only read-only queries like <code>SELECT</code>/<code>SHOW</code>/<code>EXPLAIN</code>
+            or comments). Open it in an editor tab instead, or choose <em>Import anyway</em>.
+          </p>
+        </div>
+
         <fieldset class="mode-fieldset" :disabled="importing || tooLarge">
           <legend>Import target</legend>
           <label class="mode-option">
@@ -130,15 +147,47 @@ onBeforeUnmount(() => {
         <button type="button" class="btn" :disabled="importing" @click="emit('close')">
           Cancel
         </button>
-        <button
-          type="button"
-          class="btn primary"
-          data-testid="import-confirm-btn"
-          :disabled="importing || tooLarge"
-          @click="emit('confirm', mode)"
-        >
-          {{ importing ? 'Importing…' : 'Import' }}
-        </button>
+        <template v-if="isQueryOnly && !tooLarge">
+          <button
+            type="button"
+            class="btn"
+            data-testid="import-anyway-btn"
+            :disabled="importing"
+            @click="emit('confirm', mode)"
+          >
+            {{ importing ? 'Importing…' : 'Import anyway' }}
+          </button>
+          <button
+            type="button"
+            class="btn primary"
+            data-testid="import-open-editor-btn"
+            :disabled="importing"
+            @click="emit('open-in-editor')"
+          >
+            Open in editor
+          </button>
+        </template>
+        <template v-else>
+          <button
+            v-if="canOpenInEditor && !tooLarge"
+            type="button"
+            class="btn"
+            data-testid="import-open-editor-btn"
+            :disabled="importing"
+            @click="emit('open-in-editor')"
+          >
+            Open in editor
+          </button>
+          <button
+            type="button"
+            class="btn primary"
+            data-testid="import-confirm-btn"
+            :disabled="importing || tooLarge"
+            @click="emit('confirm', mode)"
+          >
+            {{ importing ? 'Importing…' : 'Import' }}
+          </button>
+        </template>
       </div>
     </div>
   </div>
@@ -294,6 +343,20 @@ onBeforeUnmount(() => {
   background: var(--danger-bg);
   color: var(--danger);
   font-size: 12.5px;
+}
+
+.query-only-notice {
+  padding: 9px 11px;
+  border-radius: 6px;
+  border: 1px solid var(--warning);
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.query-only-notice p {
+  margin: 4px 0 0;
 }
 
 .modal-footer {

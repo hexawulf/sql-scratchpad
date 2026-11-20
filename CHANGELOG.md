@@ -2,6 +2,19 @@
 
 All notable changes to SQL Scratchpad are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Query-only script detection in Import modal:** selecting or dropping a `.sql` file with no DDL/DML (only `SELECT`/`WITH…SELECT`/`SHOW`/`EXPLAIN`/`DESCRIBE` or comments) now shows a clear notice instead of blindly executing it, offering **Open in editor** (primary) and **Import anyway**.
+- **Contextual `ER_NO_SUCH_TABLE` (1146) import hint:** failed imports hitting error 1146 now attach an optional `hint` on `ImportErrorDetail` naming the active workspace dataset, rendered in both the Messages panel and Status log, alongside an **Open in editor** button on failed import cards (≤ 256 KB).
+
+### Fixed
+
+- **Statement splitter comment/line attribution & UTF-8 BOM support:** `splitMariaDbStatements` now strips a leading UTF-8 BOM (fixing line-1 `DELIMITER` directives) and strips leading non-conditional comments (`--`, `#`, `/* … */`, while preserving executable `/*! … */` conditional comments) so echoed SQL text in Messages always starts on the reported `startLine` across LF and CRLF files.
+- **6 MB import JSON-envelope headroom:** raised the Fastify JSON `bodyLimit` on `POST /api/workspaces/:wsId/import` to 7 MB while keeping the raw SQL limit at 6 MB (`413 PAYLOAD_TOO_LARGE`), so ~5.9 MB `.sql` scripts with heavy newline/quote escaping no longer fail with HTTP 413.
+- **Messages panel mutual clearing:** running a query now clears any previous Import summary card, and importing a script clears previous Run statement cards so Messages reflects only the latest action.
+
 ## [0.3.3] - 2026-11-20
 
 ### Added

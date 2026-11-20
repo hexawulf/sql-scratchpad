@@ -23,7 +23,7 @@ import { parseIpAllowList, parseTrustProxy, type AppConfig } from './config.js';
 import { IpHasher, buildLoggerOptions, sqlLogMeta, unwrapMappedIpv4 } from './logger.js';
 import { checkDbHealth, createAdminPool } from './db.js';
 import { loadDatasets } from './datasets.js';
-import { fastifyErrorHandler, formatApiError } from './errors.js';
+import { ApiError, fastifyErrorHandler, formatApiError } from './errors.js';
 import { WorkspaceManager } from './workspace-manager.js';
 import { ExecEngine } from './exec-engine.js';
 import { ImportByteBudget, ImportEngine } from './import-engine.js';
@@ -33,9 +33,9 @@ import { registerStaticSpa } from './static.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_VERSION: string = (() => {
   try {
-    const pkg = JSON.parse(
-      readFileSync(resolve(__dirname, '..', 'package.json'), 'utf8'),
-    ) as { version?: string };
+    const pkg = JSON.parse(readFileSync(resolve(__dirname, '..', 'package.json'), 'utf8')) as {
+      version?: string;
+    };
     return pkg.version ?? '0.3.3';
   } catch {
     return '0.3.3';
@@ -43,7 +43,8 @@ const PKG_VERSION: string = (() => {
 })();
 
 export const BODY_LIMIT_BYTES = 256 * 1024;
-export const IMPORT_BODY_LIMIT_BYTES = 6 * 1024 * 1024;
+export const IMPORT_SQL_MAX_BYTES = 6 * 1024 * 1024;
+export const IMPORT_BODY_LIMIT_BYTES = 7 * 1024 * 1024;
 
 export interface BuildAppOptions {
   config: AppConfig;
@@ -100,7 +101,7 @@ const importBodySchema = {
   required: ['sql'],
   additionalProperties: false,
   properties: {
-    sql: { type: 'string', maxLength: IMPORT_BODY_LIMIT_BYTES },
+    sql: { type: 'string' },
     mode: { type: 'string', enum: ['fresh', 'append'], default: 'fresh' },
   },
 } as const;
@@ -219,9 +220,7 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     '/api/workspaces',
     {
       schema: { body: datasetBodySchema },
-      config: rateLimitEnabled
-        ? { rateLimit: { max: 20, timeWindow: '1 hour' } }
-        : undefined,
+      config: rateLimitEnabled ? { rateLimit: { max: 20, timeWindow: '1 hour' } } : undefined,
     },
     async (req, reply): Promise<CreateWorkspaceResponse> => {
       const ownerIpHash = ipHasher.key(req.ip || 'unknown');
@@ -240,9 +239,7 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     '/api/workspaces/:wsId/reset',
     {
       schema: { params: wsIdParamsSchema, body: datasetBodySchema },
-      config: rateLimitEnabled
-        ? { rateLimit: { max: 10, timeWindow: '1 hour' } }
-        : undefined,
+      config: rateLimitEnabled ? { rateLimit: { max: 10, timeWindow: '1 hour' } } : undefined,
     },
     async (req): Promise<ResetWorkspaceResponse> => {
       return workspaceManager.resetWorkspace(req.params.wsId, req.body.dataset);
@@ -253,9 +250,7 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     '/api/workspaces/:wsId/exec',
     {
       schema: { params: wsIdParamsSchema, body: execBodySchema },
-      config: rateLimitEnabled
-        ? { rateLimit: { max: 60, timeWindow: '1 minute' } }
-        : undefined,
+      config: rateLimitEnabled ? { rateLimit: { max: 60, timeWindow: '1 minute' } } : undefined,
     },
     async (req): Promise<ExecResponse> => {
       const execReq: ExecRequest = {
@@ -280,30 +275,32 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     {
       bodyLimit: IMPORT_BODY_LIMIT_BYTES,
       schema: { params: wsIdParamsSchema, body: importBodySchema },
-      config: rateLimitEnabled
-        ? { rateLimit: { max: 20, timeWindow: '1 hour' } }
-        : undefined,
-      preHandler: rateLimitEnabled
-        ? async (req, reply) => {
-            if (loadtestAllowIps.has(unwrapMappedIpv4(req.ip || ''))) {
-              return;
-            }
-            const bytes = Buffer.byteLength(req.body.sql, 'utf8');
-            const decision = importByteBudget.consume(ipHasher.key(req.ip || 'unknown'), bytes);
-            if (!decision.allowed) {
-              void reply.header('Retry-After', String(decision.retryAfterSec));
-              const budgetMb = Math.round(config.IMPORT_BYTE_BUDGET_PER_HOUR / (1024 * 1024));
-              return reply
-                .code(429)
-                .send(
-                  formatApiError(
-                    'IMPORT_BYTE_BUDGET_EXCEEDED',
-                    `Import byte budget (${budgetMb} MB/hour) exceeded. Retry in ${decision.retryAfterSec} seconds.`,
-                  ),
-                );
-            }
-          }
-        : undefined,
+      config: rateLimitEnabled ? { rateLimit: { max: 20, timeWindow: '1 hour' } } : undefined,
+      preHandler: async (req, reply) => {
+        const bytes = Buffer.byteLength(req.body.sql, 'utf8');
+        if (req.body.sql.length > IMPORT_SQL_MAX_BYTES || bytes > IMPORT_SQL_MAX_BYTES) {
+          throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'Imported SQL exceeds 6 MB limit');
+        }
+        if (!rateLimitEnabled) {
+          return;
+        }
+        if (loadtestAllowIps.has(unwrapMappedIpv4(req.ip || ''))) {
+          return;
+        }
+        const decision = importByteBudget.consume(ipHasher.key(req.ip || 'unknown'), bytes);
+        if (!decision.allowed) {
+          void reply.header('Retry-After', String(decision.retryAfterSec));
+          const budgetMb = Math.round(config.IMPORT_BYTE_BUDGET_PER_HOUR / (1024 * 1024));
+          return reply
+            .code(429)
+            .send(
+              formatApiError(
+                'IMPORT_BYTE_BUDGET_EXCEEDED',
+                `Import byte budget (${budgetMb} MB/hour) exceeded. Retry in ${decision.retryAfterSec} seconds.`,
+              ),
+            );
+        }
+      },
     },
     async (req): Promise<ImportResponse> => {
       const importReq: ImportRequest = {
@@ -326,9 +323,7 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     '/api/workspaces/:wsId/schema',
     {
       schema: { params: wsIdParamsSchema },
-      config: rateLimitEnabled
-        ? { rateLimit: { max: 120, timeWindow: '1 minute' } }
-        : undefined,
+      config: rateLimitEnabled ? { rateLimit: { max: 120, timeWindow: '1 minute' } } : undefined,
     },
     async (req): Promise<SchemaTree> => {
       const ws = workspaceManager.getWorkspace(req.params.wsId);
@@ -341,9 +336,7 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     '/api/workspaces/:wsId/sessions/:session/kill',
     {
       schema: { params: killParamsSchema },
-      config: rateLimitEnabled
-        ? { rateLimit: { max: 60, timeWindow: '1 minute' } }
-        : undefined,
+      config: rateLimitEnabled ? { rateLimit: { max: 60, timeWindow: '1 minute' } } : undefined,
     },
     async (req): Promise<OkResponse> => {
       await workspaceManager.killSessionQuery(req.params.wsId, req.params.session);
@@ -355,9 +348,7 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     '/api/workspaces/:wsId/close',
     {
       schema: { params: wsIdParamsSchema },
-      config: rateLimitEnabled
-        ? { rateLimit: { max: 60, timeWindow: '1 minute' } }
-        : undefined,
+      config: rateLimitEnabled ? { rateLimit: { max: 60, timeWindow: '1 minute' } } : undefined,
     },
     async (req): Promise<OkResponse> => {
       const callerIpHash = ipHasher.key(req.ip || 'unknown');
@@ -370,9 +361,7 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     '/api/workspaces/:wsId',
     {
       schema: { params: wsIdParamsSchema },
-      config: rateLimitEnabled
-        ? { rateLimit: { max: 60, timeWindow: '1 minute' } }
-        : undefined,
+      config: rateLimitEnabled ? { rateLimit: { max: 60, timeWindow: '1 minute' } } : undefined,
     },
     async (req): Promise<OkResponse> => {
       await workspaceManager.deleteWorkspace(req.params.wsId);

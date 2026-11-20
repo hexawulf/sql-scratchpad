@@ -8,6 +8,7 @@ import {
 } from './exec-engine.js';
 import {
   ImportByteBudget,
+  buildImportErrorHint,
   classifyImportSkip,
   rewriteDefinerClauses,
 } from './import-engine.js';
@@ -54,6 +55,98 @@ describe('splitMariaDbStatements', () => {
     expect(stmts[0]!.sql).toContain('CREATE TRIGGER t_bi');
     expect(stmts[0]!.sql).toContain('SET NEW.x = 1;');
     expect(stmts[1]!.sql).toBe('SELECT 42');
+  });
+
+  it('strips leading non-conditional comments so echoed sql agrees with startLine (LF, CRLF, block comments, BOM)', () => {
+    const lfScript = [
+      '-- 1 -- After explanation of select and from',
+      '-- select all data records (rows) from a table',
+      'SELECT *',
+      'FROM Country;',
+      'SELECT continent FROM Country;',
+    ].join('\n');
+
+    const lfStmts = splitMariaDbStatements(lfScript);
+    expect(lfStmts).toHaveLength(2);
+    expect(lfStmts[0]).toEqual({
+      sql: 'SELECT *\nFROM Country',
+      startLine: 3,
+    });
+    expect(lfStmts[1]).toEqual({
+      sql: 'SELECT continent FROM Country',
+      startLine: 5,
+    });
+
+    const crlfScript = [
+      '\uFEFF-- 1 -- CRLF with UTF-8 BOM',
+      '# hash comment',
+      'SELECT *',
+      'FROM Country;',
+      '/* multi-line',
+      '   block comment */',
+      'SELECT continent FROM Country;',
+    ].join('\r\n');
+
+    const crlfStmts = splitMariaDbStatements(crlfScript);
+    expect(crlfStmts).toHaveLength(2);
+    expect(crlfStmts[0]).toEqual({
+      sql: 'SELECT *\r\nFROM Country',
+      startLine: 3,
+    });
+    expect(crlfStmts[1]).toEqual({
+      sql: 'SELECT continent FROM Country',
+      startLine: 7,
+    });
+  });
+
+  it('preserves executable conditional comments while stripping preceding non-conditional comments', () => {
+    const sql = [
+      '/* dump header',
+      '   note */',
+      '/*!50001 CREATE VIEW v_demo AS SELECT 1 */;',
+    ].join('\n');
+
+    const stmts = splitMariaDbStatements(sql);
+    expect(stmts).toHaveLength(1);
+    expect(stmts[0]).toEqual({
+      sql: '/*!50001 CREATE VIEW v_demo AS SELECT 1 */',
+      startLine: 3,
+    });
+  });
+
+  it('handles UTF-8 BOM before DELIMITER on line 1', () => {
+    const sql = [
+      '\uFEFFDELIMITER //',
+      'CREATE TRIGGER t_bom BEFORE INSERT ON x FOR EACH ROW',
+      'BEGIN',
+      '  SET NEW.a = 1;',
+      'END //',
+      'DELIMITER ;',
+      'SELECT 1;',
+    ].join('\n');
+
+    const stmts = splitMariaDbStatements(sql);
+    expect(stmts).toHaveLength(2);
+    expect(stmts[0]!.startLine).toBe(2);
+    expect(stmts[0]!.sql).toContain('CREATE TRIGGER t_bom');
+    expect(stmts[0]!.sql).toContain('SET NEW.a = 1;');
+    expect(stmts[1]).toEqual({ sql: 'SELECT 1', startLine: 7 });
+  });
+});
+
+describe('buildImportErrorHint', () => {
+  it('returns a contextual hint mentioning the dataset on ER_NO_SUCH_TABLE (1146)', () => {
+    const emptyHint = buildImportErrorHint(1146, 'empty', false);
+    expect(emptyHint).toBeDefined();
+    expect(emptyHint).toContain("'empty'");
+    expect(emptyHint).toMatch(/editor/i);
+
+    const partialHint = buildImportErrorHint(1146, 'sample-library', true);
+    expect(partialHint).toBeDefined();
+    expect(partialHint).toContain("'sample-library'");
+
+    expect(buildImportErrorHint(1064, 'empty', false)).toBeUndefined();
+    expect(buildImportErrorHint(undefined, 'empty', false)).toBeUndefined();
   });
 });
 

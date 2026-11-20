@@ -5,11 +5,16 @@ import { formatDurationSeconds } from '../utils/status-format';
 export interface ImportSummaryRecord {
   fileName: string;
   response: ImportResponse;
+  sqlText?: string;
 }
 
 defineProps<{
   results: StatementResult[];
   importSummary?: ImportSummaryRecord | null;
+}>();
+
+const emit = defineEmits<{
+  'open-in-editor': [fileName: string, sqlText: string];
 }>();
 </script>
 
@@ -27,11 +32,16 @@ defineProps<{
             importSummary.response.mode === 'fresh' ? 'fresh workspace' : 'added to current'
           }})
         </strong>
-        <span class="msg-dur">{{ formatDurationSeconds(importSummary.response.durationMs) }} s</span>
+        <span class="msg-dur"
+          >{{ formatDurationSeconds(importSummary.response.durationMs) }} s</span
+        >
       </div>
 
       <div class="import-stats">
-        <span>Status: <strong>{{ importSummary.response.ok ? 'OK' : 'Stopped on error' }}</strong></span>
+        <span
+          >Status:
+          <strong>{{ importSummary.response.ok ? 'OK' : 'Stopped on error' }}</strong></span
+        >
         <span>Run: {{ importSummary.response.statementsRun }}</span>
         <span>OK: {{ importSummary.response.statementsOk }}</span>
         <span>Skipped: {{ importSummary.response.skippedCount }}</span>
@@ -56,8 +66,28 @@ defineProps<{
             : ''
         }}: {{ importSummary.response.error.message }}
       </div>
+      <div
+        v-if="importSummary.response.error?.hint"
+        class="import-hint"
+        data-testid="import-error-hint"
+      >
+        {{ importSummary.response.error.hint }}
+      </div>
       <div v-if="importSummary.response.note" class="import-note">
         {{ importSummary.response.note }}
+      </div>
+      <div
+        v-if="!importSummary.response.ok && importSummary.sqlText !== undefined"
+        class="import-error-actions"
+      >
+        <button
+          type="button"
+          class="mini-action-btn"
+          data-testid="import-error-open-editor-btn"
+          @click="emit('open-in-editor', importSummary.fileName, importSummary.sqlText)"
+        >
+          Open in editor
+        </button>
       </div>
 
       <details v-if="importSummary.response.rewritten.length > 0" class="skipped-details">
@@ -88,12 +118,7 @@ defineProps<{
     <div v-if="results.length === 0 && !importSummary" class="messages-empty">
       No statements executed yet.
     </div>
-    <div
-      v-for="res in results"
-      :key="res.index"
-      class="msg-card"
-      :class="`kind-${res.kind}`"
-    >
+    <div v-for="res in results" :key="res.index" class="msg-card" :class="`kind-${res.kind}`">
       <div class="msg-head">
         <span class="msg-idx">#{{ res.index + 1 }} (line {{ res.startLine }})</span>
         <span class="msg-dur">{{ formatDurationSeconds(res.durationMs) }} s</span>
@@ -115,9 +140,7 @@ defineProps<{
         {{ res.error?.message }}
       </div>
       <ul v-if="res.warnings && res.warnings.length > 0" class="msg-warnings">
-        <li v-for="(w, i) in res.warnings" :key="i">
-          {{ w.level }} {{ w.code }}: {{ w.message }}
-        </li>
+        <li v-for="(w, i) in res.warnings" :key="i">{{ w.level }} {{ w.code }}: {{ w.message }}</li>
       </ul>
     </div>
   </div>
@@ -175,6 +198,35 @@ defineProps<{
   margin-top: 4px;
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.import-hint {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.import-error-actions {
+  margin-top: 8px;
+}
+
+.mini-action-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.mini-action-btn:hover {
+  background: var(--bg-hover);
 }
 
 .skipped-details {

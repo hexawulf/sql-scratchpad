@@ -16,6 +16,15 @@ describe('registerStaticSpa', () => {
       join(tempDir, 'index.html'),
       '<!doctype html><html><body>SQL Scratchpad</body></html>',
     );
+    writeFileSync(
+      join(tempDir, 'favicon.svg'),
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"></svg>',
+    );
+    writeFileSync(join(tempDir, 'favicon.ico'), Buffer.from([0x00, 0x00, 0x01, 0x00]));
+    writeFileSync(
+      join(tempDir, 'apple-touch-icon.png'),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
     writeFileSync(join(tempDir, 'assets', 'app-abc123.js'), 'console.log("ok");');
     writeFileSync(join(tempDir, '.env'), 'SECRET=shouldnotserve\n');
     writeFileSync(join(tempDir, '.git', 'config'), '[core]\n\trepositoryformatversion = 0\n');
@@ -55,6 +64,38 @@ describe('registerStaticSpa', () => {
     });
 
     await app.close();
+  });
+
+  it('serves favicon.svg, favicon.ico, and apple-touch-icon.png with proper Content-Type and without SPA fallback', async () => {
+    const app = Fastify();
+    expect(registerStaticSpa(app, tempDir)).toBe(true);
+
+    try {
+      const cases = [
+        { url: '/favicon.svg', contentType: 'image/svg+xml', snippet: '<svg' },
+        { url: '/favicon.ico', contentType: 'image/x-icon', snippet: null },
+        { url: '/apple-touch-icon.png', contentType: 'image/png', snippet: null },
+      ] as const;
+
+      for (const { url, contentType, snippet } of cases) {
+        const getRes = await app.inject({ method: 'GET', url });
+        expect(getRes.statusCode, `GET ${url}`).toBe(200);
+        expect(getRes.headers['content-type']).toBe(contentType);
+        expect(getRes.headers['content-security-policy']).toBe(CSP_HEADER);
+        expect(getRes.headers['x-content-type-options']).toBe('nosniff');
+        expect(getRes.body).not.toContain('<!doctype html>');
+        if (snippet) {
+          expect(getRes.body).toContain(snippet);
+        }
+
+        const headRes = await app.inject({ method: 'HEAD', url });
+        expect(headRes.statusCode, `HEAD ${url}`).toBe(200);
+        expect(headRes.headers['content-type']).toBe(contentType);
+        expect(headRes.rawPayload.length).toBe(0);
+      }
+    } finally {
+      await app.close();
+    }
   });
 
   it('returns false when distDir has no index.html', () => {

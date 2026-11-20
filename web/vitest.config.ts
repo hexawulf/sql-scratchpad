@@ -5,7 +5,7 @@ import vue from '@vitejs/plugin-vue';
 export default defineConfig({
   plugins: [vue()],
   define: {
-    __APP_VERSION__: JSON.stringify('0.3.4'),
+    __APP_VERSION__: JSON.stringify('0.3.5'),
     __GIT_SHA__: JSON.stringify('testsha'),
   },
   resolve: {

@@ -2,6 +2,12 @@
 
 All notable changes to SQL Scratchpad are documented in this file.
 
+## [0.3.5] - 2026-11-20
+
+### Added
+
+- **Browser-tab and home-screen favicons:** added an original flat SVG favicon (`web/public/favicon.svg`, database cylinder with `>_` SQL prompt on the app's `#1d4ed8` accent tile for light/dark tab legibility), a 16×16 + 32×32 `favicon.ico`, a 180×180 `apple-touch-icon.png`, corresponding `<link>` and `<meta name="theme-color">` tags in `web/index.html`, and static-server route tests verifying `200` and exact `Content-Type` headers without SPA fallback.
+
 ## [0.3.4] - 2026-11-20
 
 ### Added

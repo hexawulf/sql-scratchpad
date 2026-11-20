@@ -147,7 +147,7 @@ describe('Vue components', () => {
       'SQL Scratchpad — a Letos-style SQL playground (MariaDB + SQLite)',
     );
     expect(wrapper.get('[data-testid="about-version"]').text()).toContain(
-      'Version 0.3.4 · build testsha',
+      'Version 0.3.5 · build testsha',
     );
     expect(wrapper.text()).toContain('Erling Wulf Weinreich (0xWulf)');
     expect(wrapper.text()).toContain('MariaDB, sql.js (SQLite), Vue 3, CodeMirror 6, Fastify');
@@ -389,7 +389,7 @@ describe('App workspace lifecycle and 429/503 error UX', () => {
       const url = String(input);
       const method = init?.method ?? 'GET';
       if (url === '/api/health') {
-        return makeJsonResponse(200, { status: 'ok', db: 'ok', version: '0.3.4' });
+        return makeJsonResponse(200, { status: 'ok', db: 'ok', version: '0.3.5' });
       }
       if (url === '/api/datasets') {
         return makeJsonResponse(200, [
@@ -459,7 +459,7 @@ describe('App workspace lifecycle and 429/503 error UX', () => {
       calls.push({ method, url });
 
       if (url === '/api/health') {
-        return makeJsonResponse(200, { status: 'ok', db: 'ok', version: '0.3.4' });
+        return makeJsonResponse(200, { status: 'ok', db: 'ok', version: '0.3.5' });
       }
       if (url === '/api/datasets') {
         return makeJsonResponse(200, [
@@ -555,7 +555,7 @@ describe('App workspace lifecycle and 429/503 error UX', () => {
       calls.push({ method, url });
 
       if (url === '/api/health') {
-        return makeJsonResponse(200, { status: 'ok', db: 'ok', version: '0.3.4' });
+        return makeJsonResponse(200, { status: 'ok', db: 'ok', version: '0.3.5' });
       }
       if (url === '/api/datasets') {
         return makeJsonResponse(200, [

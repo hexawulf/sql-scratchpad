@@ -9,7 +9,7 @@
 [![Docker Hub](https://img.shields.io/docker/v/0xwulf/sql-scratchpad?sort=semver&label=docker&color=2496ED&logo=docker&logoColor=white)](https://hub.docker.com/r/0xwulf/sql-scratchpad)
 [![CI](https://github.com/hexawulf/sql-scratchpad/actions/workflows/ci.yml/badge.svg)](https://github.com/hexawulf/sql-scratchpad/actions/workflows/ci.yml)
 
-![SQL Scratchpad workspace screenshot](docs/screenshot.png)
+![SQL Scratchpad workspace screenshot](https://raw.githubusercontent.com/hexawulf/sql-scratchpad/main/docs/screenshot.png)
 
 ## Features
 

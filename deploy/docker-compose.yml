@@ -2,10 +2,7 @@ name: sql-scratchpad
 
 services:
   db:
-    image: sql-scratchpad-db:local
-    build:
-      context: ..
-      dockerfile: db/Dockerfile
+    image: 0xwulf/sql-scratchpad-db:0.3.3
     restart: unless-stopped
     env_file:
       - db.env
@@ -30,10 +27,7 @@ services:
       start_period: 45s
 
   app:
-    image: sql-scratchpad:local
-    build:
-      context: ..
-      dockerfile: Dockerfile
+    image: 0xwulf/sql-scratchpad:0.3.3
     restart: unless-stopped
     env_file:
       - app.env

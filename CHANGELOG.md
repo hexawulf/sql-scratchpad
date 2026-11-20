@@ -2,6 +2,19 @@
 
 All notable changes to SQL Scratchpad are documented in this file.
 
+## [0.3.3] - 2026-11-20
+
+### Added
+
+- **README badge header:** added shields.io badges for the live website (`sql-scratchpad.com`), source repository, GitHub release, MIT license, Docker Hub image version, and CI workflow status.
+- **Published multi-arch Docker Hub images:** added `.github/workflows/release.yml` (gated on full CI including Playwright E2E via `workflow_call`) to build and publish `0xwulf/sql-scratchpad` and `0xwulf/sql-scratchpad-db` for `linux/amd64` and `linux/arm64` on `v*.*.*` tags with `X.Y.Z`, `X.Y`, and `latest` tags, OCI image labels, SBOM + `provenance: mode=max` attestations, and automated Docker Hub overview syncing (`README.md` and `docs/DOCKERHUB-DB.md`).
+- **Build-from-source Compose variant:** added `deploy/docker-compose.build.yml` for contributors and operators who prefer building images locally.
+
+### Changed
+
+- **Self-hosting via `docker compose pull`:** switched `deploy/docker-compose.yml` and `docs/SELF-HOSTING.md` to pull pinned multi-arch images (`0xwulf/sql-scratchpad:0.3.3` and `0xwulf/sql-scratchpad-db:0.3.3`) by default, keeping all container hardening intact.
+- **Cross-platform app `Dockerfile`:** moved `base`, `builder`, and `prod-deps` onto `$BUILDPLATFORM` (`FROM --platform=$BUILDPLATFORM`) so TypeScript, Vite, and pure-JS dependency installation run natively without QEMU while `runtime` stays target-arch native.
+
 ## [0.3.2] - 2026-11-20
 
 ### Security

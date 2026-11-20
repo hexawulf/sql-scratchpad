@@ -1,9 +1,9 @@
 # Self-Hosting SQL Scratchpad
 
-SQL Scratchpad runs as two Docker containers built directly from this repository — no external container registry account is required:
+SQL Scratchpad runs as two prebuilt multi-arch (`linux/amd64`, `linux/arm64`) Docker images published on Docker Hub — no local Node.js or build toolchain is required:
 
-- **`sql-scratchpad-db:local`** — MariaDB 11.4 LTS with conservative memory settings and the `sample-library` template database.
-- **`sql-scratchpad:local`** — Node 24 Fastify API + prebuilt Vue 3 static SPA.
+- **`0xwulf/sql-scratchpad-db:0.3.3`** — MariaDB 11.4 LTS with conservative memory settings and the `sample-library` template database.
+- **`0xwulf/sql-scratchpad:0.3.3`** — Node 24 Fastify API + prebuilt Vue 3 static SPA.
 
 ## Resource Requirements
 
@@ -12,9 +12,9 @@ SQL Scratchpad runs as two Docker containers built directly from this repository
 - **Disk:** ~700 MB for images plus up to 1 GB temporary workspace budget.
 - **Software:** Docker Engine 24+ and Docker Compose v2.
 
-## Quick Start
+## Quick Start (Prebuilt Docker Hub Images)
 
-1. **Clone the repository:**
+1. **Clone the repository** (or copy `deploy/docker-compose.yml`, `deploy/db.env.example`, and `deploy/app.env.example`):
 
    ```bash
    git clone https://github.com/hexawulf/sql-scratchpad.git
@@ -38,20 +38,28 @@ SQL Scratchpad runs as two Docker containers built directly from this repository
 
    Edit `deploy/db.env` and `deploy/app.env` with those generated values. Never place `MARIADB_ROOT_PASSWORD` in `deploy/app.env`.
 
-4. **Build and start the stack:**
+4. **Pull and start the stack:**
 
    ```bash
-   docker compose -f deploy/docker-compose.yml up -d --build
+   docker compose -f deploy/docker-compose.yml pull ; docker compose -f deploy/docker-compose.yml up -d
    ```
 
 5. **Verify health:**
 
    ```bash
    curl -s http://127.0.0.1:5050/api/health
-   # Expected: {"status":"ok","db":"ok","version":"0.3.2"}
+   # Expected: {"status":"ok","db":"ok","version":"0.3.3"}
    ```
 
    Open `http://127.0.0.1:5050` in your browser.
+
+## Building From Source
+
+Contributors or operators who prefer to build images locally instead of pulling from Docker Hub can use `deploy/docker-compose.build.yml` (same hardening and network isolation, tagged `sql-scratchpad:local` and `sql-scratchpad-db:local`):
+
+```bash
+docker compose -f deploy/docker-compose.build.yml up -d --build
+```
 
 ## Environment Variables
 
@@ -97,18 +105,24 @@ By default, `deploy/docker-compose.yml` binds `127.0.0.1:5050`. When exposing SQ
 
 ## Updating and Resetting
 
-- **Code-only upgrade:**
+- **Release upgrade (prebuilt images):** bump the pinned version tags in `deploy/docker-compose.yml` (or `git pull` a new release tag), then pull and recreate:
+
+  ```bash
+  docker compose -f deploy/docker-compose.yml pull ; docker compose -f deploy/docker-compose.yml up -d
+  ```
+
+- **Build-from-source upgrade:**
 
   ```bash
   git pull
-  docker compose -f deploy/docker-compose.yml up -d --build
+  docker compose -f deploy/docker-compose.build.yml up -d --build
   ```
 
 - **Full database reset** (required only when `seeds/sample-library.sql` or `db/init/` changes):
 
   ```bash
   docker compose -f deploy/docker-compose.yml down -v
-  docker compose -f deploy/docker-compose.yml up -d --build
+  docker compose -f deploy/docker-compose.yml pull ; docker compose -f deploy/docker-compose.yml up -d
   ```
 
   Workspaces are ephemeral by design, so no database backup is needed.

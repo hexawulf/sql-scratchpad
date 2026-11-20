@@ -3,7 +3,7 @@
 # Node 24 LTS (bookworm-slim) multi-arch OCI index (linux/arm64 + linux/amd64)
 ARG NODE_IMAGE=node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54
 
-FROM ${NODE_IMAGE} AS base
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS base
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable ; corepack prepare pnpm@12.21.0 --activate
 

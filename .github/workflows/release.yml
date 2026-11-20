@@ -1,0 +1,154 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: CI on Tag
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: refs/tags/${{ github.ref_name }}
+
+  publish:
+    name: Build & Publish Multi-Arch Images
+    if: github.repository == 'hexawulf/sql-scratchpad'
+    needs: [ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ github.ref_name }}
+          persist-credentials: false
+
+      - name: Verify tag matches package.json and capture commit metadata
+        id: rev
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag must match vX.Y.Z (got: $TAG)"
+            exit 1
+          fi
+          pkg_version=$(node -p "require('./package.json').version")
+          if [ "v${pkg_version}" != "$TAG" ]; then
+            echo "::error::package.json version (${pkg_version}) does not match tag (${TAG})"
+            exit 1
+          fi
+          {
+            echo "version=${pkg_version}"
+            echo "short_sha=$(git rev-parse --short HEAD)"
+            echo "full_sha=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Docker metadata (app)
+        id: meta_app
+        uses: docker/metadata-action@v6
+        with:
+          images: 0xwulf/sql-scratchpad
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+          flavor: |
+            latest=auto
+          labels: |
+            org.opencontainers.image.title=SQL Scratchpad
+            org.opencontainers.image.description=Letos-style SQL playground in the browser backed by isolated MariaDB 11.4 workspaces
+            org.opencontainers.image.source=https://github.com/hexawulf/sql-scratchpad
+            org.opencontainers.image.url=https://sql-scratchpad.com
+            org.opencontainers.image.version=${{ steps.rev.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.rev.outputs.full_sha }}
+            org.opencontainers.image.licenses=MIT
+
+      - name: Docker metadata (db)
+        id: meta_db
+        uses: docker/metadata-action@v6
+        with:
+          images: 0xwulf/sql-scratchpad-db
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+          flavor: |
+            latest=auto
+          labels: |
+            org.opencontainers.image.title=SQL Scratchpad DB
+            org.opencontainers.image.description=MariaDB 11.4 LTS database image for SQL Scratchpad with isolated workspace setup
+            org.opencontainers.image.source=https://github.com/hexawulf/sql-scratchpad
+            org.opencontainers.image.url=https://sql-scratchpad.com
+            org.opencontainers.image.version=${{ steps.rev.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.rev.outputs.full_sha }}
+            org.opencontainers.image.licenses=MIT
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push app image (linux/amd64, linux/arm64)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta_app.outputs.tags }}
+          labels: ${{ steps.meta_app.outputs.labels }}
+          build-args: |
+            GIT_SHA=${{ steps.rev.outputs.short_sha }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+
+      - name: Build and push db image (linux/amd64, linux/arm64)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: db/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta_db.outputs.tags }}
+          labels: ${{ steps.meta_db.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=db
+          cache-to: type=gha,mode=max,scope=db
+
+      - name: Sync Docker Hub description (app)
+        uses: peter-evans/dockerhub-description@v5
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: 0xwulf/sql-scratchpad
+          short-description: Letos-style SQL playground in the browser backed by isolated MariaDB 11.4 workspaces
+          readme-filepath: ./README.md
+          enable-url-completion: true
+
+      - name: Sync Docker Hub description (db)
+        uses: peter-evans/dockerhub-description@v5
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: 0xwulf/sql-scratchpad-db
+          short-description: MariaDB 11.4 LTS database image for SQL Scratchpad with isolated workspace setup
+          readme-filepath: ./docs/DOCKERHUB-DB.md
+          enable-url-completion: true

@@ -1,9 +1,13 @@
 # SQL Scratchpad
 
-A lightweight, Letos-style SQL playground in the browser backed by real **MariaDB 11.4 LTS** isolated workspaces.
+> A lightweight, Letos-style SQL playground in the browser backed by real **MariaDB 11.4 LTS** isolated workspaces.
 
-- **Web app:** https://sql-scratchpad.com
-- **Source:** https://github.com/hexawulf/sql-scratchpad
+[![Website](https://img.shields.io/badge/website-sql--scratchpad.com-blue)](https://sql-scratchpad.com)
+[![Source](https://img.shields.io/badge/source-hexawulf%2Fsql--scratchpad-181717?logo=github&logoColor=white)](https://github.com/hexawulf/sql-scratchpad)
+[![Release](https://img.shields.io/github/v/release/hexawulf/sql-scratchpad?label=release&color=brightgreen)](https://github.com/hexawulf/sql-scratchpad/releases/latest)
+[![License](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+[![Docker Hub](https://img.shields.io/docker/v/0xwulf/sql-scratchpad?sort=semver&label=docker&color=2496ED&logo=docker&logoColor=white)](https://hub.docker.com/r/0xwulf/sql-scratchpad)
+[![CI](https://github.com/hexawulf/sql-scratchpad/actions/workflows/ci.yml/badge.svg)](https://github.com/hexawulf/sql-scratchpad/actions/workflows/ci.yml)
 
 ![SQL Scratchpad workspace screenshot](docs/screenshot.png)
 
@@ -51,10 +55,10 @@ Generate strong random passwords (for example with `openssl rand -base64 32`), p
 
 ```bash
 chmod 600 deploy/db.env deploy/app.env
-docker compose -f deploy/docker-compose.yml up -d --build
+docker compose -f deploy/docker-compose.yml pull ; docker compose -f deploy/docker-compose.yml up -d
 ```
 
-SQL Scratchpad listens on `http://127.0.0.1:5050` by default. See [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) for configuration, reverse-proxy setup, and maintenance.
+SQL Scratchpad listens on `http://127.0.0.1:5050` by default using prebuilt multi-arch (`linux/amd64`, `linux/arm64`) images from Docker Hub (`0xwulf/sql-scratchpad` and `0xwulf/sql-scratchpad-db`). To build from source instead, use `deploy/docker-compose.build.yml`. See [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) for configuration, reverse-proxy setup, and maintenance.
 
 ## Documentation
 

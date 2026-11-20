@@ -2,7 +2,7 @@
 
 All notable changes to SQL Scratchpad are documented in this file.
 
-## [Unreleased]
+## [0.3.4] - 2026-11-20
 
 ### Added
 

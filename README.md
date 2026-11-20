@@ -2,7 +2,7 @@
 
 A lightweight, Letos-style SQL playground in the browser backed by real **MariaDB 11.4 LTS** isolated workspaces.
 
-- **Web app:** https://sql-scratchpad.com *(coming soon)*
+- **Web app:** https://sql-scratchpad.com
 - **Source:** https://github.com/hexawulf/sql-scratchpad
 
 ![SQL Scratchpad workspace screenshot](docs/screenshot.png)

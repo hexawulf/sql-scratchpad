@@ -278,15 +278,15 @@ importers:
         specifier: ^15.9.1
         version: 15.9.1
       sql.js:
-        specifier: ^1.13.0
-        version: 1.16.0
+        specifier: ^1.17.0
+        version: 1.17.0
       vue:
         specifier: ^3.5.45
         version: 3.5.45(typescript@6.0.3)
     devDependencies:
       '@types/sql.js':
-        specifier: ^1.4.9
-        version: 1.4.11
+        specifier: ^1.16.0
+        version: 1.16.0
       '@vitejs/plugin-vue':
         specifier: ^6.0.11
         version: 6.0.11(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15))(vue@3.5.45(typescript@6.0.3))
@@ -812,8 +812,8 @@ packages:
   '@types/node@26.6.6':
     resolution: {integrity: sha512-MzQj+8Kx3XI40OmUAE6Qoh58ZMNstNNMwn2nfd3qWsfe7nDNSqJNzes4njhz6AHwrSHOffSLwXU6yb474Q4aog==}
 
-  '@types/sql.js@1.4.11':
-    resolution: {integrity: sha512-QXIx38p2ZThJaK9vP5ZdqdlRe1FG9I8SmCZOS7FHfB/2qPAjZwkL7/vlfPg6N/oWHuuOaGg/P/IRwfP2W0kWVQ==}
+  '@types/sql.js@1.16.0':
+    resolution: {integrity: sha512-GKyBpH0SOnplgFqfdLSJ27LhNmY2JokyIIOvGevVjuD3WZ2fMuEmT8u+wIX+pTUID4Pl1D5aH0kXZ0TB9gkTZw==}
 
   '@typescript-eslint/eslint-plugin@8.73.0':
     resolution: {integrity: sha512-UkygMFer53Yzn29MCYFTHf34hGXf5KJhiDWfIm1tXtXRrym1CS6l5H9Y3yCtPWChpC0/f93H88gdj8tN0dd4kw==}
@@ -1870,8 +1870,8 @@ packages:
     resolution: {integrity: sha512-Xiwkk0F/5zPB8zZg5QrATyyhdu43lld6yok4oKVO29dubyGDjSRb21RsHpDOnN+xVvMTp3qL84mIsZNsJK+JWA==}
     hasBin: true
 
-  sql.js@1.16.0:
-    resolution: {integrity: sha512-q/JOZuJfmVh8Zf8Eo+cMJvtxAWeWBqTfJ6AQYGXZmcaLGHMwhA2niH3fQYHrBtPeOss1ttzHec07K5+rHaMRMw==}
+  sql.js@1.17.0:
+    resolution: {integrity: sha512-HNdo5+2eSTEm7iLcfXUd2mjZX3Oe+5mJ0uDgIpirS7gSLHhZIw9kWDWxNcDVeFGEIBxJlkgo525g0CZJoH8GgA==}
 
   std-env@4.3.0:
     resolution: {integrity: sha512-OtU/EgQ1kIm5KwqQpBC6ZEMXrZRui11w8zgfTWp8cdO9B8OaPsbA8bTHO2P+HNo1VlUTGMVBwPhydu6poeXiag==}
@@ -2535,7 +2535,7 @@ snapshots:
     dependencies:
       undici-types: 8.9.0
 
-  '@types/sql.js@1.4.11':
+  '@types/sql.js@1.16.0':
     dependencies:
       '@types/emscripten': 1.41.6
       '@types/node': 26.6.6
@@ -3659,7 +3659,7 @@ snapshots:
       argparse: 2.0.1
       nearley: 2.20.1
 
-  sql.js@1.16.0: {}
+  sql.js@1.17.0: {}
 
   std-env@4.3.0: {}
 

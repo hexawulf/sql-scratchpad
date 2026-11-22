@@ -43,3 +43,11 @@ updates:
       day: monday
       time: '04:00'
       timezone: Asia/Taipei
+    ignore:
+      # Stay on the MariaDB 11.4 LTS line (supported until 2029): only 11.4.x
+      # patch and digest updates. A server line change (11.8 / 12.x LTS, or the
+      # rolling 13.x) needs a planned dump -> upgrade -> restore, not a bump.
+      - dependency-name: mariadb
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor

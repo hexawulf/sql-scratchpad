@@ -2,6 +2,20 @@
 
 All notable changes to SQL Scratchpad are documented in this file.
 
+## [0.3.6] - 2026-11-22
+
+### Changed
+
+- **Dependency updates:** TypeScript 6.0, vitest 5.1, eslint 10, dotenv 18, @types/node 26, sql-formatter 15.9.1 (Dependabot #2–#5, #8, #9).
+
+### Security
+
+- **Dependabot alerts closed:** `glob` 13.0.7 → 14.0.6 and `minimatch` 10.2.6 → 11.0.9 via scoped pnpm overrides (`js-beautify>glob`, `editorconfig>minimatch` in `pnpm-workspace.yaml`); both come from the dev-only `@vue/test-utils` → `js-beautify` chain (#6). `pnpm audit`: no known vulnerabilities.
+
+### CI
+
+- **MariaDB stays on the 11.4 LTS line:** Dependabot ignores `mariadb` major and minor updates in `/db` (11.4 is supported until 2029); only 11.4.x patch and digest updates arrive (#7).
+
 ## [0.3.5] - 2026-11-20
 
 ### Added

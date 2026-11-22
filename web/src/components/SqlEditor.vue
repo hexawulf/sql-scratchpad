@@ -132,7 +132,7 @@ function buildThemeExtension(theme: 'light' | 'dark') {
           color: 'var(--text-primary)',
         },
         '.cm-activeLine': {
-          backgroundColor: isDark ? 'rgba(59, 130, 246, 0.08)' : 'rgba(29, 78, 216, 0.05)',
+          backgroundColor: isDark ? 'rgba(20, 184, 166, 0.08)' : 'rgba(13, 148, 136, 0.05)',
         },
         '.cm-error-line': {
           backgroundColor: 'var(--error-line-bg)',

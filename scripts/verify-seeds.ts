@@ -40,11 +40,11 @@ const ROOT = path.resolve(__dirname, '..');
 const SEED_PATH = path.join(ROOT, 'seeds', 'sample-library.sql');
 
 const serverRequire = createRequire(path.join(ROOT, 'server', 'package.json'));
-const webRequire = createRequire(path.join(ROOT, 'web', 'package.json'));
+const rootRequire = createRequire(path.join(ROOT, 'package.json'));
 
 const dotenv = serverRequire('dotenv') as DotenvModule;
 const mysql = serverRequire('mysql2/promise') as MysqlModule;
-const initSqlJs = webRequire('sql.js') as InitSqlJs;
+const initSqlJs = rootRequire('sql.js') as InitSqlJs;
 
 dotenv.config({ path: path.join(ROOT, '.env') });
 

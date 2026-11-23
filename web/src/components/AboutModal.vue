@@ -186,7 +186,7 @@ onBeforeUnmount(() => {
 .about-card {
   width: 480px;
   max-width: 96vw;
-  background: var(--bg-panel);
+  background: var(--bg-elevated);
   color: var(--text-primary);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -213,7 +213,7 @@ onBeforeUnmount(() => {
 
 .about-close-btn {
   border: 1px solid var(--border);
-  background: var(--bg-panel);
+  background: var(--bg-elevated);
   color: var(--text-primary);
   border-radius: 3px;
   width: 26px;

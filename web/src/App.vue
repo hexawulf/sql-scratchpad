@@ -1327,8 +1327,8 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  background: var(--error-bg, #fee2e2);
-  color: var(--error, #991b1b);
+  background: var(--danger-bg);
+  color: var(--danger);
   border-bottom: 1px solid var(--border);
   font-size: 13px;
   font-weight: 600;

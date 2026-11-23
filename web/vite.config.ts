@@ -55,5 +55,8 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     sourcemap: false,
+    // The CSP (server/src/static.ts) has no data: in font-src, so small font
+    // subsets must ship as files instead of being inlined as data: URIs.
+    assetsInlineLimit: (filePath) => (/\.woff2?$/.test(filePath) ? false : undefined),
   },
 });

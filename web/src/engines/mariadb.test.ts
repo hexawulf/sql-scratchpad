@@ -31,7 +31,9 @@ describe('MariaDbAdapter', () => {
       }
       if (url === '/api/workspaces/wsid12345678/exec' && method === 'POST') {
         return jsonResponse(200, {
-          results: [{ index: 0, sql: 'SELECT 1', startLine: 1, kind: 'rows', rows: [[1]], durationMs: 1 }],
+          results: [
+            { index: 0, sql: 'SELECT 1', startLine: 1, kind: 'rows', rows: [[1]], durationMs: 1 },
+          ],
           txOpen: false,
         });
       }

@@ -1,10 +1,7 @@
 import type { EngineId } from '@sql-scratchpad/shared';
 
 export type IsolationLevel =
-  | 'READ UNCOMMITTED'
-  | 'READ COMMITTED'
-  | 'REPEATABLE READ'
-  | 'SERIALIZABLE';
+  'READ UNCOMMITTED' | 'READ COMMITTED' | 'REPEATABLE READ' | 'SERIALIZABLE';
 
 export interface EditorTab {
   id: string;

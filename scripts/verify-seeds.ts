@@ -158,7 +158,9 @@ async function verifyMariaDb(seedSql: string): Promise<{
       checkRejected = true;
     }
     if (!checkRejected) {
-      throw new Error('MariaDB did not reject INSERT violating chk_loans_dates (due_date > loaned_date)');
+      throw new Error(
+        'MariaDB did not reject INSERT violating chk_loans_dates (due_date > loaned_date)',
+      );
     }
     console.log('  PASS MariaDB CHECK constraint chk_loans_dates rejected invalid dates');
 
@@ -202,9 +204,7 @@ async function verifySqlite(seedSql: string): Promise<{
     }
 
     if (fkCount !== EXPECTED_FK_COUNT) {
-      throw new Error(
-        `SQLite FK count mismatch: expected ${EXPECTED_FK_COUNT}, got ${fkCount}`,
-      );
+      throw new Error(`SQLite FK count mismatch: expected ${EXPECTED_FK_COUNT}, got ${fkCount}`);
     }
     console.log(
       `  PASS sqlite/sample-library foreign keys: ${fkCount} (loaded in ${elapsedMs.toFixed(1)} ms)`,
@@ -219,9 +219,13 @@ async function verifySqlite(seedSql: string): Promise<{
       checkRejected = true;
     }
     if (!checkRejected) {
-      throw new Error('SQLite did not reject INSERT violating chk_loans_dates (due_date > loaned_date)');
+      throw new Error(
+        'SQLite did not reject INSERT violating chk_loans_dates (due_date > loaned_date)',
+      );
     }
-    console.log('  PASS sqlite/sample-library CHECK constraint chk_loans_dates rejected invalid dates');
+    console.log(
+      '  PASS sqlite/sample-library CHECK constraint chk_loans_dates rejected invalid dates',
+    );
 
     return { counts, fkCount };
   } finally {

@@ -76,7 +76,8 @@ export function registerStaticSpa(app: FastifyInstance, distDir: string): boolea
     }
 
     const relativePath = decodedPath.replace(/^\/+/, '');
-    const candidate = relativePath.length > 0 ? resolve(normalizedRoot, relativePath) : indexHtmlPath;
+    const candidate =
+      relativePath.length > 0 ? resolve(normalizedRoot, relativePath) : indexHtmlPath;
 
     if (candidate !== indexHtmlPath && !candidate.startsWith(rootPrefix)) {
       return reply.code(404).send(formatApiError('NOT_FOUND', 'Not found'));

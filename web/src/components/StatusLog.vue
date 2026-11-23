@@ -27,7 +27,12 @@ watch(
   <div class="status-panel" data-testid="status-log">
     <div class="status-header">
       <span class="status-title">Status</span>
-      <button type="button" class="mini-btn" :disabled="entries.length === 0" @click="emit('clear')">
+      <button
+        type="button"
+        class="mini-btn"
+        :disabled="entries.length === 0"
+        @click="emit('clear')"
+      >
         Clear
       </button>
     </div>

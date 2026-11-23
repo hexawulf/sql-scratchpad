@@ -141,9 +141,7 @@ function isCellNumeric(colIdx: number, val: unknown): boolean {
       </div>
     </div>
 
-    <div v-if="columns.length === 0" class="grid-empty">
-      Run a query to view results.
-    </div>
+    <div v-if="columns.length === 0" class="grid-empty">Run a query to view results.</div>
 
     <div
       v-else
@@ -169,13 +167,7 @@ function isCellNumeric(colIdx: number, val: unknown): boolean {
             class="grid-cell header-btn"
             :class="{ 'is-numeric': numericFlags[idx] }"
             role="columnheader"
-            :aria-sort="
-              sortCol === idx
-                ? sortDir === 'asc'
-                  ? 'ascending'
-                  : 'descending'
-                : 'none'
-            "
+            :aria-sort="sortCol === idx ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
             :title="`${col.name} (${col.type})`"
             @click="toggleSort(idx)"
           >
@@ -206,7 +198,9 @@ function isCellNumeric(colIdx: number, val: unknown): boolean {
               :key="`${vRow.index}-${cIdx}-${col.name}`"
               class="grid-cell"
               :class="{
-                'is-null': sortedRows[vRow.index]?.[cIdx] === null || sortedRows[vRow.index]?.[cIdx] === undefined,
+                'is-null':
+                  sortedRows[vRow.index]?.[cIdx] === null ||
+                  sortedRows[vRow.index]?.[cIdx] === undefined,
                 'is-numeric': isCellNumeric(cIdx, sortedRows[vRow.index]?.[cIdx]),
               }"
               role="gridcell"

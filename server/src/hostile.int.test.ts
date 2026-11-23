@@ -850,10 +850,7 @@ describe('SQL Scratchpad M8-lite hostile corpus & hardening integration (real Ma
 
     // Part B: delete during an active import
     const wsDel = await createWs('empty', '203.0.113.43');
-    const importLines = [
-      'CREATE TABLE del_race (id INT PRIMARY KEY);',
-      'SELECT SLEEP(4);',
-    ];
+    const importLines = ['CREATE TABLE del_race (id INT PRIMARY KEY);', 'SELECT SLEEP(4);'];
     for (let i = 1; i <= 200; i += 1) {
       importLines.push(`INSERT INTO del_race VALUES (${i});`);
     }

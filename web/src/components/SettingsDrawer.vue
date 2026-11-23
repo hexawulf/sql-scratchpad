@@ -75,7 +75,10 @@ const ISOLATION_LEVELS: IsolationLevel[] = [
             />
             <span>
               <strong>Safe Update Mode</strong>
-              <small><code>sql_safe_updates = 1</code> — block UPDATE/DELETE without a key in WHERE</small>
+              <small
+                ><code>sql_safe_updates = 1</code> — block UPDATE/DELETE without a key in
+                WHERE</small
+              >
             </span>
           </label>
 
@@ -84,7 +87,9 @@ const ISOLATION_LEVELS: IsolationLevel[] = [
               type="checkbox"
               :checked="settings.onlyFullGroupBy"
               :disabled="disabled"
-              @change="emit('toggle-only-full-group-by', ($event.target as HTMLInputElement).checked)"
+              @change="
+                emit('toggle-only-full-group-by', ($event.target as HTMLInputElement).checked)
+              "
             />
             <span>
               <strong>ONLY_FULL_GROUP_BY</strong>
@@ -144,10 +149,7 @@ const ISOLATION_LEVELS: IsolationLevel[] = [
             <select
               :value="settings.theme"
               @change="
-                emit(
-                  'change-theme',
-                  ($event.target as HTMLSelectElement).value as 'light' | 'dark',
-                )
+                emit('change-theme', ($event.target as HTMLSelectElement).value as 'light' | 'dark')
               "
             >
               <option value="light">Light</option>

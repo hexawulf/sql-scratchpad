@@ -18,13 +18,14 @@ import {
   indentWithTab,
   toggleComment,
 } from '@codemirror/commands';
-import {
-  bracketMatching,
-  defaultHighlightStyle,
-  syntaxHighlighting,
-} from '@codemirror/language';
+import { bracketMatching, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { MySQL, sql, type SQLNamespace } from '@codemirror/lang-sql';
-import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
+import {
+  autocompletion,
+  closeBrackets,
+  closeBracketsKeymap,
+  completionKeymap,
+} from '@codemirror/autocomplete';
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
 import { format as formatSql } from 'sql-formatter';
 import type { SchemaTree } from '@sql-scratchpad/shared';

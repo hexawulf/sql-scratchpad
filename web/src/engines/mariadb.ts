@@ -122,10 +122,9 @@ export class MariaDbAdapter implements EngineAdapter {
 
   async schema(): Promise<SchemaTree> {
     const wsId = this.requireWorkspace();
-    const tree = await this.request<SchemaTree>(
-      `/workspaces/${encodeURIComponent(wsId)}/schema`,
-      { method: 'GET' },
-    );
+    const tree = await this.request<SchemaTree>(`/workspaces/${encodeURIComponent(wsId)}/schema`, {
+      method: 'GET',
+    });
     this.database = tree.database;
     return tree;
   }

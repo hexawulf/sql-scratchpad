@@ -24,9 +24,7 @@ export function parseTrustProxy(raw?: string): string[] | false {
   if (entries.length === 0) return false;
   for (const entry of entries) {
     if (!isValidIpOrCidr(entry)) {
-      throw new Error(
-        `TRUST_PROXY entry "${entry}" is not a valid IP address or CIDR range`,
-      );
+      throw new Error(`TRUST_PROXY entry "${entry}" is not a valid IP address or CIDR range`);
     }
   }
   return entries;
@@ -50,9 +48,7 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   HOST: z.string().min(1).default('127.0.0.1'),
   PORT: z.coerce.number().int().min(1).max(65535).default(5050),
-  LOG_LEVEL: z
-    .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
-    .default('info'),
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   TRUST_PROXY: z
     .string()
     .optional()
@@ -130,7 +126,11 @@ const EnvSchema = z.object({
     .int()
     .positive()
     .default(5 * 1024 * 1024),
-  IMPORT_TIMEOUT_MS: z.coerce.number().int().positive().default(75 * 1000),
+  IMPORT_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(75 * 1000),
   IMPORT_MAX_STATEMENTS: z.coerce.number().int().positive().default(60_000),
   IMPORT_BYTE_BUDGET_PER_HOUR: z.coerce
     .number()

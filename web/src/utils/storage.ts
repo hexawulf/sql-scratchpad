@@ -15,7 +15,9 @@ export function createDefaultSettings(): AppSettings {
   };
 }
 
-export function loadPersistedState(storage: Storage | null = safeLocalStorage()): PersistedStateV1 | null {
+export function loadPersistedState(
+  storage: Storage | null = safeLocalStorage(),
+): PersistedStateV1 | null {
   if (!storage) return null;
   try {
     const raw = storage.getItem(STORAGE_KEY);
@@ -25,17 +27,27 @@ export function loadPersistedState(storage: Storage | null = safeLocalStorage())
 
     const defaults = createDefaultSettings();
     const settings: AppSettings = {
-      stopOnError: typeof parsed.settings?.stopOnError === 'boolean' ? parsed.settings.stopOnError : defaults.stopOnError,
-      safeUpdates: typeof parsed.settings?.safeUpdates === 'boolean' ? parsed.settings.safeUpdates : defaults.safeUpdates,
+      stopOnError:
+        typeof parsed.settings?.stopOnError === 'boolean'
+          ? parsed.settings.stopOnError
+          : defaults.stopOnError,
+      safeUpdates:
+        typeof parsed.settings?.safeUpdates === 'boolean'
+          ? parsed.settings.safeUpdates
+          : defaults.safeUpdates,
       onlyFullGroupBy:
         typeof parsed.settings?.onlyFullGroupBy === 'boolean'
           ? parsed.settings.onlyFullGroupBy
           : defaults.onlyFullGroupBy,
-      strict: typeof parsed.settings?.strict === 'boolean' ? parsed.settings.strict : defaults.strict,
+      strict:
+        typeof parsed.settings?.strict === 'boolean' ? parsed.settings.strict : defaults.strict,
       isolation: isIsolationLevel(parsed.settings?.isolation)
         ? parsed.settings.isolation
         : defaults.isolation,
-      autocommit: typeof parsed.settings?.autocommit === 'boolean' ? parsed.settings.autocommit : defaults.autocommit,
+      autocommit:
+        typeof parsed.settings?.autocommit === 'boolean'
+          ? parsed.settings.autocommit
+          : defaults.autocommit,
       theme: parsed.settings?.theme === 'dark' ? 'dark' : 'light',
     };
 

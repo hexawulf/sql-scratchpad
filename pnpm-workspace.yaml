@@ -9,5 +9,5 @@ allowBuilds:
 # Dependabot alerts (dev-only chain: @vue/test-utils -> js-beautify 2.0.3).
 # js-beautify still pins glob ^13 and editorconfig ^3 (minimatch ~10).
 overrides:
-  "js-beautify>glob": "^14.0.6"
-  "editorconfig>minimatch": "^11.0.5"
+  'js-beautify>glob': '^14.0.6'
+  'editorconfig>minimatch': '^11.0.5'

@@ -1,5 +1,10 @@
 import { randomBytes } from 'node:crypto';
-import mysql, { type Connection, type Pool, type PoolConnection, type RowDataPacket } from 'mysql2/promise';
+import mysql, {
+  type Connection,
+  type Pool,
+  type PoolConnection,
+  type RowDataPacket,
+} from 'mysql2/promise';
 import type { FastifyBaseLogger } from 'fastify';
 import type { DatasetMeta, SessionId } from '@sql-scratchpad/shared';
 import type { AppConfig } from './config.js';
@@ -193,9 +198,9 @@ export class WorkspaceManager {
   isWorkspaceBusy(ws: WorkspaceEntry): boolean {
     return Boolean(
       ws.teardownActive ||
-        ws.deleting ||
-        this.isSessionBusy(ws, 'A') ||
-        this.isSessionBusy(ws, 'B'),
+      ws.deleting ||
+      this.isSessionBusy(ws, 'A') ||
+      this.isSessionBusy(ws, 'B'),
     );
   }
 
@@ -280,11 +285,7 @@ export class WorkspaceManager {
 
     const totalBytes = await this.getTotalWorkspaceBytes();
     if (totalBytes >= this.config.MAX_TOTAL_WORKSPACE_BYTES) {
-      throw new ApiError(
-        503,
-        'STORAGE_BUDGET_EXCEEDED',
-        'Total workspace storage budget exceeded',
-      );
+      throw new ApiError(503, 'STORAGE_BUDGET_EXCEEDED', 'Total workspace storage budget exceeded');
     }
 
     const wsId = randomBase32Id(16);
@@ -922,7 +923,9 @@ export class WorkspaceManager {
           }
           // NEVER use CREATE TABLE ... LIKE (drops foreign keys). Run full DDL inside targetDb.
           await conn.query(ddl);
-          await conn.query(`INSERT INTO ${dstIdent}.${tblIdent} SELECT * FROM ${tplIdent}.${tblIdent}`);
+          await conn.query(
+            `INSERT INTO ${dstIdent}.${tblIdent} SELECT * FROM ${tplIdent}.${tblIdent}`,
+          );
         }
       } finally {
         await conn.query('SET FOREIGN_KEY_CHECKS = 1');

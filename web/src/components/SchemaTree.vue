@@ -155,12 +155,10 @@ function engineLabel(engine: SchemaTree['engine']): string {
                   <ul v-if="expanded[`table:${table.name}`]" class="tree-branch" role="group">
                     <!-- Columns -->
                     <li>
-                      <button
-                        type="button"
-                        class="tree-row"
-                        @click="toggle(`cols:${table.name}`)"
-                      >
-                        <span class="caret">{{ expanded[`cols:${table.name}`] !== false ? '▾' : '▸' }}</span>
+                      <button type="button" class="tree-row" @click="toggle(`cols:${table.name}`)">
+                        <span class="caret">{{
+                          expanded[`cols:${table.name}`] !== false ? '▾' : '▸'
+                        }}</span>
                         <span>Columns ({{ table.columns.length }})</span>
                       </button>
                       <ul v-if="expanded[`cols:${table.name}`] !== false" class="tree-branch">
@@ -191,11 +189,7 @@ function engineLabel(engine: SchemaTree['engine']): string {
 
                     <!-- Indexes -->
                     <li>
-                      <button
-                        type="button"
-                        class="tree-row"
-                        @click="toggle(`idx:${table.name}`)"
-                      >
+                      <button type="button" class="tree-row" @click="toggle(`idx:${table.name}`)">
                         <span class="caret">{{ expanded[`idx:${table.name}`] ? '▾' : '▸' }}</span>
                         <span>Indexes ({{ table.indexes.length }})</span>
                       </button>
@@ -210,11 +204,7 @@ function engineLabel(engine: SchemaTree['engine']): string {
 
                     <!-- Triggers -->
                     <li>
-                      <button
-                        type="button"
-                        class="tree-row"
-                        @click="toggle(`trg:${table.name}`)"
-                      >
+                      <button type="button" class="tree-row" @click="toggle(`trg:${table.name}`)">
                         <span class="caret">{{ expanded[`trg:${table.name}`] ? '▾' : '▸' }}</span>
                         <span>Triggers ({{ table.triggers.length }})</span>
                       </button>

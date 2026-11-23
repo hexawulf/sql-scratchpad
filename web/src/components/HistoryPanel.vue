@@ -15,7 +15,12 @@ const emit = defineEmits<{
   <div class="history-panel" data-testid="history-panel">
     <div class="history-bar">
       <span class="history-count">{{ entries.length }} execution(s)</span>
-      <button type="button" class="mini-btn" :disabled="entries.length === 0" @click="emit('clear')">
+      <button
+        type="button"
+        class="mini-btn"
+        :disabled="entries.length === 0"
+        @click="emit('clear')"
+      >
         Clear history
       </button>
     </div>

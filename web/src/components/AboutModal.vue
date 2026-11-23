@@ -85,12 +85,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div
-    v-if="open"
-    class="about-backdrop"
-    data-testid="about-backdrop"
-    @click.self="emit('close')"
-  >
+  <div v-if="open" class="about-backdrop" data-testid="about-backdrop" @click.self="emit('close')">
     <div
       ref="dialogRef"
       class="about-card"

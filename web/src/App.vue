@@ -817,7 +817,7 @@ onBeforeUnmount(() => {
               {{ currentDataset }}
             </option>
             <option v-for="ds in datasets" :key="ds.id" :value="ds.id">
-              {{ ds.id }} — {{ ds.title }}
+              {{ ds.title }}
             </option>
           </select>
         </label>
@@ -875,17 +875,6 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="toolbar-group toolbar-right">
-        <span v-if="txOpen" class="tx-badge" data-testid="tx-badge"> ● Transaction open (A) </span>
-
-        <button
-          type="button"
-          class="tb-btn"
-          title="About SQL Scratchpad"
-          data-testid="about-btn"
-          @click="aboutOpen = true"
-        >
-          About
-        </button>
         <button
           type="button"
           class="tb-btn"
@@ -924,6 +913,15 @@ onBeforeUnmount(() => {
           @click="settingsOpen = true"
         >
           ⚙ Session
+        </button>
+        <button
+          type="button"
+          class="tb-btn"
+          title="About SQL Scratchpad"
+          data-testid="about-btn"
+          @click="aboutOpen = true"
+        >
+          About
         </button>
       </div>
     </header>
@@ -1011,28 +1009,33 @@ onBeforeUnmount(() => {
             <!-- Top: Query | History -->
             <Pane :size="44" :min-size="20">
               <div class="pane-shell">
-                <div class="pane-tabs" role="tablist">
-                  <button
-                    type="button"
-                    class="sub-tab"
-                    :class="{ active: editorTab === 'query' }"
-                    role="tab"
-                    :aria-selected="editorTab === 'query'"
-                    @click="editorTab = 'query'"
-                  >
-                    Query
-                  </button>
-                  <button
-                    type="button"
-                    class="sub-tab"
-                    :class="{ active: editorTab === 'history' }"
-                    role="tab"
-                    :aria-selected="editorTab === 'history'"
-                    data-testid="history-tab-btn"
-                    @click="editorTab = 'history'"
-                  >
-                    History ({{ historyEntries.length }})
-                  </button>
+                <div class="pane-tabs result-header-bar">
+                  <div class="tab-group" role="tablist">
+                    <button
+                      type="button"
+                      class="sub-tab"
+                      :class="{ active: editorTab === 'query' }"
+                      role="tab"
+                      :aria-selected="editorTab === 'query'"
+                      @click="editorTab = 'query'"
+                    >
+                      Query
+                    </button>
+                    <button
+                      type="button"
+                      class="sub-tab"
+                      :class="{ active: editorTab === 'history' }"
+                      role="tab"
+                      :aria-selected="editorTab === 'history'"
+                      data-testid="history-tab-btn"
+                      @click="editorTab = 'history'"
+                    >
+                      History ({{ historyEntries.length }})
+                    </button>
+                  </div>
+                  <span v-if="txOpen" class="tx-badge" data-testid="tx-badge" role="status">
+                    ● Transaction open (session A)
+                  </span>
                 </div>
                 <div class="pane-body">
                   <SqlEditor
@@ -1253,6 +1256,7 @@ onBeforeUnmount(() => {
 
 .toolbar-group {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }

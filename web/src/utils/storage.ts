@@ -68,7 +68,7 @@ export function loadPersistedState(
             (h): h is PersistedStateV1['history'][number] =>
               !!h &&
               typeof h.ts === 'string' &&
-              (h.engine === 'mariadb' || h.engine === 'sqlite') &&
+              h.engine === 'mariadb' &&
               typeof h.dataset === 'string' &&
               typeof h.sql === 'string' &&
               typeof h.summary === 'string',
@@ -78,7 +78,7 @@ export function loadPersistedState(
 
     return {
       wsId: typeof parsed.wsId === 'string' && parsed.wsId.length > 0 ? parsed.wsId : null,
-      engine: parsed.engine === 'sqlite' ? 'sqlite' : 'mariadb',
+      engine: 'mariadb',
       dataset:
         typeof parsed.dataset === 'string' && parsed.dataset.length > 0
           ? parsed.dataset

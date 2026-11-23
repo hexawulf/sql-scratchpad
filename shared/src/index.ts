@@ -1,4 +1,4 @@
-export type EngineId = 'mariadb' | 'sqlite';
+export type EngineId = 'mariadb';
 export type SessionId = 'A' | 'B';
 
 export interface ColumnMeta {

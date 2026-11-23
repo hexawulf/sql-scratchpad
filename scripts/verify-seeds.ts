@@ -23,28 +23,14 @@ interface DotenvModule {
   config(opts?: { path?: string }): { error?: Error };
 }
 
-interface SqlJsDatabase {
-  run(sql: string): void;
-  exec(sql: string): Array<{ columns: string[]; values: unknown[][] }>;
-  close(): void;
-}
-
-interface SqlJsModule {
-  Database: new () => SqlJsDatabase;
-}
-
-type InitSqlJs = () => Promise<SqlJsModule>;
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const SEED_PATH = path.join(ROOT, 'seeds', 'sample-library.sql');
 
 const serverRequire = createRequire(path.join(ROOT, 'server', 'package.json'));
-const rootRequire = createRequire(path.join(ROOT, 'package.json'));
 
 const dotenv = serverRequire('dotenv') as DotenvModule;
 const mysql = serverRequire('mysql2/promise') as MysqlModule;
-const initSqlJs = rootRequire('sql.js') as InitSqlJs;
 
 dotenv.config({ path: path.join(ROOT, '.env') });
 
@@ -171,68 +157,6 @@ async function verifyMariaDb(seedSql: string): Promise<{
   }
 }
 
-async function verifySqlite(seedSql: string): Promise<{
-  counts: Map<string, number>;
-  fkCount: number;
-}> {
-  console.log('\n=== SQLite (sql.js) verification ===');
-  const SQL = await initSqlJs();
-  const db = new SQL.Database();
-
-  try {
-    db.run('PRAGMA foreign_keys = ON;');
-    const start = process.hrtime.bigint();
-    db.run(seedSql);
-    const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
-
-    const tableRes = db.exec(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;",
-    );
-    const tableNames = (tableRes[0]?.values ?? []).map((r) => String(r[0]));
-
-    const counts = new Map<string, number>();
-    let fkCount = 0;
-
-    for (const name of tableNames) {
-      const cntRes = db.exec(`SELECT COUNT(*) FROM "${name}";`);
-      const count = Number(cntRes[0]?.values[0]?.[0] ?? -1);
-      counts.set(name, count);
-      console.log(`  PASS sqlite/sample-library.${name}: ${count} rows`);
-
-      const fkRes = db.exec(`PRAGMA foreign_key_list("${name}");`);
-      fkCount += fkRes[0]?.values.length ?? 0;
-    }
-
-    if (fkCount !== EXPECTED_FK_COUNT) {
-      throw new Error(`SQLite FK count mismatch: expected ${EXPECTED_FK_COUNT}, got ${fkCount}`);
-    }
-    console.log(
-      `  PASS sqlite/sample-library foreign keys: ${fkCount} (loaded in ${elapsedMs.toFixed(1)} ms)`,
-    );
-
-    let checkRejected = false;
-    try {
-      db.run(
-        "INSERT INTO Loans (loan_id, book_id, member_id, loaned_date, due_date, returned_date, late_fee) VALUES (999, 101, 201, '2025-10-10', '2025-10-10', NULL, NULL);",
-      );
-    } catch {
-      checkRejected = true;
-    }
-    if (!checkRejected) {
-      throw new Error(
-        'SQLite did not reject INSERT violating chk_loans_dates (due_date > loaned_date)',
-      );
-    }
-    console.log(
-      '  PASS sqlite/sample-library CHECK constraint chk_loans_dates rejected invalid dates',
-    );
-
-    return { counts, fkCount };
-  } finally {
-    db.close();
-  }
-}
-
 function assertIdenticalCounts(
   label: string,
   actual: Map<string, number>,
@@ -259,16 +183,13 @@ async function main(): Promise<void> {
   const expected = new Map(EXPECTED_TABLES.map((t) => [t.table, t.rows]));
 
   const maria = await verifyMariaDb(seedSql);
-  const sqlite = await verifySqlite(seedSql);
 
   assertIdenticalCounts('MariaDB tpl_sample_library', maria.templateCounts, expected);
   assertIdenticalCounts('MariaDB fresh load', maria.freshCounts, expected);
-  assertIdenticalCounts('SQLite sql.js', sqlite.counts, expected);
-  assertIdenticalCounts('MariaDB vs SQLite', maria.freshCounts, sqlite.counts);
 
   const totalRows = [...expected.values()].reduce((acc, n) => acc + n, 0);
   console.log(
-    `\nALL SEED VERIFICATIONS PASSED (${expected.size} tables, ${totalRows} rows, ${maria.fkCount} FKs identical across MariaDB and SQLite).`,
+    `\nALL SEED VERIFICATIONS PASSED (${expected.size} tables, ${totalRows} rows, ${maria.fkCount} FKs on MariaDB 11.4).`,
   );
 }
 

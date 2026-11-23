@@ -19,7 +19,7 @@
 - **Session toggles:** toggle `sql_safe_updates`, `ONLY_FULL_GROUP_BY`, `STRICT_TRANS_TABLES`, `autocommit`, and transaction isolation levels directly from the Session drawer.
 - **Bring your own SQL:** import `.sql` scripts up to **6 MB** / **60,000 statements** (via the **Import .sql…** toolbar button or drag-and-drop onto the schema tree).
 - **Built-in datasets:**
-  - `sample-library` — an original 5-table library schema (`Authors`, `Books`, `BookAuthors`, `Members`, `Loans`; 60 rows, 5 foreign keys, `CHECK` constraint, `DATE` and `DECIMAL` columns) written from scratch in portable SQL for both MariaDB 11.4 and SQLite 3.
+  - `sample-library` — an original 5-table library schema (`Authors`, `Books`, `BookAuthors`, `Members`, `Loans`; 60 rows, 5 foreign keys, `CHECK` constraint, `DATE` and `DECIMAL` columns) written from scratch in plain standard SQL.
   - `empty` — a blank database for writing DDL from scratch or importing your own `.sql` files.
 - **Self-contained frontend:** fonts (JetBrains Mono) and assets are bundled locally — zero external CDN or font requests at runtime.
 

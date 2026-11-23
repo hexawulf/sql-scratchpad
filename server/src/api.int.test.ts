@@ -90,7 +90,7 @@ describe('SQL Scratchpad API integration (real MariaDB 11.4)', () => {
     expect(d.statusCode).toBe(200);
     const list = JSON.parse(d.body) as Array<{ id: string; engines: string[] }>;
     expect(list.map((x) => x.id)).toEqual(['sample-library', 'empty']);
-    expect(list.find((x) => x.id === 'sample-library')?.engines).toEqual(['mariadb', 'sqlite']);
+    expect(list.find((x) => x.id === 'sample-library')?.engines).toEqual(['mariadb']);
   });
 
   it('passes sample-library golden queries: SELECT/WHERE/GROUP BY/HAVING/ORDER BY, INNER/LEFT JOIN, UNION, CREATE VIEW', async () => {

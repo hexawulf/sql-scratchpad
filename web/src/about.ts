@@ -2,7 +2,7 @@ const SOURCE_URL = 'https://github.com/hexawulf/sql-scratchpad';
 const SISTER_PROJECT_URL = 'https://py-scratchpad.com';
 
 export const ABOUT_INFO = {
-  tagline: 'SQL Scratchpad — a Letos-style SQL playground (MariaDB + SQLite)',
+  tagline: 'SQL Scratchpad — a Letos-style SQL playground backed by MariaDB 11.4',
   version: __APP_VERSION__,
   gitSha: __GIT_SHA__,
   developerName: 'Erling Wulf Weinreich (0xWulf)',
@@ -10,7 +10,7 @@ export const ABOUT_INFO = {
   sourceUrl: SOURCE_URL,
   sisterProjectName: 'py-scratchpad.com',
   sisterProjectUrl: SISTER_PROJECT_URL,
-  builtWith: 'MariaDB, sql.js (SQLite), Vue 3, CodeMirror 6, Fastify',
+  builtWith: 'MariaDB, Vue 3, CodeMirror 6, Fastify',
   privacy:
     'No accounts, no analytics, and no SQL logged. Workspaces are temporary and deleted after 2 h idle; editor tabs and history stay in your browser.',
   disclaimer: 'Not affiliated with any university.',

@@ -10,7 +10,7 @@ SQL Scratchpad bundles and depends on open-source fonts, libraries, and containe
 | `@fastify/rate-limit` | 11.x | MIT |
 | `mysql2` | 3.x | MIT |
 | `dbgate-query-splitter` | 4.x | MIT |
-| `dotenv` | 17.x | BSD-2-Clause |
+| `dotenv` | 18.x | BSD-2-Clause |
 | `pino` | 10.x | MIT |
 | `zod` | 4.x | MIT |
 | `vue` | 3.x | MIT |
@@ -18,7 +18,6 @@ SQL Scratchpad bundles and depends on open-source fonts, libraries, and containe
 | `@tanstack/vue-virtual` | 3.x | MIT |
 | `splitpanes` | 4.x | MIT |
 | `sql-formatter` | 15.x | MIT |
-| `sql.js` | 1.x | MIT |
 | `@fontsource/jetbrains-mono` | 5.x | SIL Open Font License 1.1 |
 
 ## Container Base Images

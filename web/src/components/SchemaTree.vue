@@ -73,10 +73,6 @@ function toggle(key: string): void {
 function isForeignKeyColumn(table: SchemaTable, columnName: string): boolean {
   return table.foreignKeys.some((fk) => fk.columns.includes(columnName));
 }
-
-function engineLabel(engine: SchemaTree['engine']): string {
-  return engine === 'mariadb' ? 'MariaDB 11.4' : 'SQLite 3';
-}
 </script>
 
 <template>
@@ -122,7 +118,7 @@ function engineLabel(engine: SchemaTree['engine']): string {
           <button type="button" class="tree-row tree-db" @click="toggle('root')">
             <span class="caret">{{ expanded.root ? '▾' : '▸' }}</span>
             <span class="db-name">{{ schema.database }}</span>
-            <span class="db-engine">({{ engineLabel(schema.engine) }})</span>
+            <span class="db-engine">(MariaDB 11.4)</span>
           </button>
 
           <ul v-if="expanded.root" class="tree-branch" role="group">
@@ -221,13 +217,12 @@ function engineLabel(engine: SchemaTree['engine']): string {
             </li>
 
             <!-- Views -->
-            <li role="treeitem" :aria-expanded="!!expanded.views">
+            <li v-if="schema.views.length > 0" role="treeitem" :aria-expanded="!!expanded.views">
               <button type="button" class="tree-row" @click="toggle('views')">
                 <span class="caret">{{ expanded.views ? '▾' : '▸' }}</span>
                 <span>Views ({{ schema.views.length }})</span>
               </button>
               <ul v-if="expanded.views" class="tree-branch" role="group">
-                <li v-if="schema.views.length === 0" class="tree-leaf muted">(none)</li>
                 <li
                   v-for="view in schema.views"
                   :key="view.name"

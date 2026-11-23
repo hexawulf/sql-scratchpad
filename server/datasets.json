@@ -4,13 +4,13 @@
     "title": "Sample: Library",
     "description": "Original 5-table library schema (Authors, Books, BookAuthors, Members, Loans; 60 rows, 5 foreign keys) for exploring JOINs, GROUP BY, HAVING, UNION, and transactions.",
     "tables": ["Authors", "Books", "BookAuthors", "Members", "Loans"],
-    "engines": ["mariadb", "sqlite"]
+    "engines": ["mariadb"]
   },
   {
     "id": "empty",
     "title": "Empty Database",
     "description": "Blank database for DDL practice or importing your own .sql scripts.",
     "tables": [],
-    "engines": ["mariadb", "sqlite"]
+    "engines": ["mariadb"]
   }
 ]

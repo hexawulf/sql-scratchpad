@@ -91,7 +91,6 @@ const historyEntries = ref<HistoryEntry[]>(persisted?.history ?? []);
 const statusEntries = ref<StatusLogEntry[]>([]);
 let nextStatusId = 1;
 
-const sidebarTab = ref<'databases' | 'exercises'>('databases');
 const editorTab = ref<'query' | 'history'>('query');
 const resultTab = ref<'grid' | 'messages'>('grid');
 const settingsOpen = ref(false);
@@ -795,14 +794,6 @@ onBeforeUnmount(() => {
       <div class="toolbar-group">
         <span class="brand">SQL Scratchpad</span>
 
-        <label class="select-wrap" title="SQL Engine">
-          <span class="sr-only">Engine</span>
-          <select aria-label="Engine" class="tb-select" data-testid="engine-select">
-            <option value="mariadb">MariaDB 11.4</option>
-            <option value="sqlite" disabled>SQLite (soon)</option>
-          </select>
-        </label>
-
         <label class="select-wrap" title="Dataset">
           <span class="sr-only">Dataset</span>
           <select
@@ -969,44 +960,15 @@ onBeforeUnmount(() => {
         <!-- Left Sidebar -->
         <Pane :size="20" :min-size="14" :max-size="38">
           <div class="sidebar-pane">
-            <div class="sidebar-content">
-              <SchemaTree
-                v-if="sidebarTab === 'databases'"
-                :schema="schema"
-                :loading="schemaLoading"
-                :error="workspaceError"
-                @refresh="refreshSchema(true, true)"
-                @insert-ident="(ident) => editorRef?.insertText(ident)"
-                @preview-table="handlePreviewTable"
-                @drop-sql-file="handleImportFileSelected"
-              />
-              <div v-else class="exercises-placeholder">
-                <p><strong>Exercises</strong></p>
-                <p>An exercise library with automatic checking is coming soon.</p>
-              </div>
-            </div>
-            <div class="sidebar-switcher" role="tablist">
-              <button
-                type="button"
-                class="sub-tab"
-                :class="{ active: sidebarTab === 'databases' }"
-                role="tab"
-                :aria-selected="sidebarTab === 'databases'"
-                @click="sidebarTab = 'databases'"
-              >
-                Databases
-              </button>
-              <button
-                type="button"
-                class="sub-tab"
-                :class="{ active: sidebarTab === 'exercises' }"
-                role="tab"
-                :aria-selected="sidebarTab === 'exercises'"
-                @click="sidebarTab = 'exercises'"
-              >
-                Exercises
-              </button>
-            </div>
+            <SchemaTree
+              :schema="schema"
+              :loading="schemaLoading"
+              :error="workspaceError"
+              @refresh="refreshSchema(true, true)"
+              @insert-ident="(ident) => editorRef?.insertText(ident)"
+              @preview-table="handlePreviewTable"
+              @drop-sql-file="handleImportFileSelected"
+            />
           </div>
         </Pane>
 
@@ -1384,26 +1346,8 @@ onBeforeUnmount(() => {
 }
 
 .sidebar-pane {
-  display: flex;
-  flex-direction: column;
   height: 100%;
-}
-
-.sidebar-content {
-  flex: 1;
-  min-height: 0;
   overflow: hidden;
-}
-
-.exercises-placeholder {
-  padding: 14px;
-  color: var(--text-secondary);
-}
-
-.sidebar-switcher {
-  display: flex;
-  border-top: 1px solid var(--border-subtle);
-  background: var(--bg-header);
 }
 
 .pane-shell {

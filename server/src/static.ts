@@ -5,7 +5,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { formatApiError } from './errors.js';
 
 export const CSP_HEADER =
-  "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; object-src 'none'; frame-ancestors 'none'";
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; frame-ancestors 'none'";
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -20,7 +20,6 @@ const MIME_TYPES: Record<string, string> = {
   '.ico': 'image/x-icon',
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
-  '.wasm': 'application/wasm',
   '.txt': 'text/plain; charset=utf-8',
   '.sql': 'application/sql; charset=utf-8',
 };

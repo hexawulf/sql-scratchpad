@@ -9,7 +9,7 @@ const DatasetSchema = z.object({
   title: z.string().min(1),
   description: z.string().min(1),
   tables: z.array(z.string()),
-  engines: z.array(z.enum(['mariadb', 'sqlite'])).min(1),
+  engines: z.array(z.literal('mariadb')).min(1),
 });
 
 const DatasetListSchema = z.array(DatasetSchema).min(1);

@@ -10,7 +10,7 @@ SQL Scratchpad is a TypeScript monorepo (`pnpm` workspaces) with three packages 
 | `server/` | Fastify 5 HTTP API, static SPA server, workspace manager, execution engine, SQL import engine, schema introspector, and janitor. |
 | `web/` | Vue 3 + Vite + CodeMirror 6 frontend SPA with virtualized result grid, schema tree, import modal, and `localStorage` state persistence. |
 | `db/` | MariaDB 11.4 LTS Dockerfile, conservative memory/safety configuration (`db/conf.d/sql-scratchpad.cnf`), and init scripts (`00-admin-user.sh`, `10-sample-library.sh`). |
-| `seeds/` | Portable sample dataset (`sample-library.sql`) verified identically on MariaDB 11.4 and SQLite (`sql.js`). |
+| `seeds/` | Sample dataset (`sample-library.sql`) in plain standard SQL, checked on MariaDB 11.4 by `pnpm seeds:verify`. |
 
 ```mermaid
 flowchart LR

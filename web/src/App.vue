@@ -799,7 +799,7 @@ onBeforeUnmount(() => {
           <span class="sr-only">Engine</span>
           <select aria-label="Engine" class="tb-select" data-testid="engine-select">
             <option value="mariadb">MariaDB 11.4</option>
-            <option value="sqlite" disabled>SQLite (M6)</option>
+            <option value="sqlite" disabled>SQLite (soon)</option>
           </select>
         </label>
 
@@ -975,7 +975,7 @@ onBeforeUnmount(() => {
               />
               <div v-else class="exercises-placeholder">
                 <p><strong>Exercises</strong></p>
-                <p>Exercise library and automatic checking arrive in M5.</p>
+                <p>An exercise library with automatic checking is coming soon.</p>
               </div>
             </div>
             <div class="sidebar-switcher" role="tablist">

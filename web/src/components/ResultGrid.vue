@@ -68,7 +68,10 @@ const virtualItems = computed(() => rowVirtualizer.value.getVirtualItems());
 const totalSize = computed(() => rowVirtualizer.value.getTotalSize());
 
 const gridTemplateColumns = computed(() => {
-  const cols = props.columns.map(() => 'minmax(110px, 1fr)');
+  // Numbers are short and right-aligned; give the spare width to text columns.
+  const cols = numericFlags.value.map((numeric) =>
+    numeric ? 'minmax(80px, 0.6fr)' : 'minmax(110px, 1.4fr)',
+  );
   return `48px ${cols.join(' ')}`;
 });
 

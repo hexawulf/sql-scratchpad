@@ -3,8 +3,8 @@ export const SISTER_PROJECT_URL = 'https://py-scratchpad.com';
 
 export const ABOUT_INFO = {
   tagline: 'SQL Scratchpad — a Letos-style SQL playground (MariaDB + SQLite)',
-  version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.3.6',
-  gitSha: typeof __GIT_SHA__ !== 'undefined' ? __GIT_SHA__ : 'dev',
+  version: __APP_VERSION__,
+  gitSha: __GIT_SHA__,
   developerName: 'Erling Wulf Weinreich (0xWulf)',
   developerEmail: 'dev@0xwulf.dev',
   sourceUrl: SOURCE_URL,

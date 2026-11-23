@@ -27,7 +27,7 @@ import {
   completionKeymap,
 } from '@codemirror/autocomplete';
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
-import { format as formatSql } from 'sql-formatter';
+import { formatDialect, mariadb } from 'sql-formatter';
 import type { SchemaTree } from '@sql-scratchpad/shared';
 import { extractStatementAtCursor } from '../utils/sql-statement';
 
@@ -190,8 +190,8 @@ function formatDocument(): boolean {
   const raw = view.state.doc.toString();
   if (!raw.trim()) return true;
   try {
-    const formatted = formatSql(raw, {
-      language: 'mariadb',
+    const formatted = formatDialect(raw, {
+      dialect: mariadb,
       keywordCase: 'upper',
       tabWidth: 2,
     });

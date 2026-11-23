@@ -171,14 +171,14 @@ function engineLabel(engine: SchemaTree['engine']): string {
                           <span class="col-name">{{ col.name }}</span>
                           <span class="col-type"> : {{ col.type }}</span>
                           <span v-if="col.key === 'PRI'" class="key-badge pk" title="Primary Key">
-                            🔑 PK
+                            PK
                           </span>
                           <span
                             v-if="isForeignKeyColumn(table, col.name)"
                             class="key-badge fk"
                             title="Foreign Key"
                           >
-                            🔗 FK
+                            FK
                           </span>
                           <span v-if="col.key === 'UNI'" class="key-badge uni" title="Unique">
                             UNI

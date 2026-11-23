@@ -953,7 +953,14 @@ onBeforeUnmount(() => {
 
     <div v-if="bannerNotice" class="notice-banner" role="status" data-testid="expired-banner">
       <span>{{ bannerNotice }}</span>
-      <button type="button" class="banner-close" @click="bannerNotice = null">×</button>
+      <button
+        type="button"
+        class="banner-close"
+        aria-label="Dismiss notice"
+        @click="bannerNotice = null"
+      >
+        ×
+      </button>
     </div>
 
     <!-- Main Workspace -->

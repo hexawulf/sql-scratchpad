@@ -12,7 +12,9 @@
   --text-secondary: #4b5563;
   --text-muted: #6b7280;
   --accent: #0d9488;
-  --accent-hover: #0f766e;
+  /* Filled controls (primary buttons, selected completion): text on these needs 4.5:1. */
+  --accent-fill: #0f766e;
+  --accent-fill-hover: #115e59;
   --accent-text: #ffffff;
   --danger: #b91c1c;
   --danger-bg: #fef2f2;
@@ -42,7 +44,8 @@
   --text-secondary: #b1bac4;
   --text-muted: #8b949e;
   --accent: #14b8a6;
-  --accent-hover: #5eead4;
+  --accent-fill: #14b8a6;
+  --accent-fill-hover: #5eead4;
   --accent-text: #042f2e;
   --danger: #f87171;
   --danger-bg: rgba(185, 28, 28, 0.2);

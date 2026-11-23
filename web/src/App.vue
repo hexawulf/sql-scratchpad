@@ -1269,14 +1269,15 @@ onBeforeUnmount(() => {
 }
 
 .tb-btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
   color: var(--accent-text);
   font-weight: 600;
 }
 
 .tb-btn.primary:hover:not(:disabled) {
-  background: var(--accent-hover);
+  background: var(--accent-fill-hover);
+  border-color: var(--accent-fill-hover);
 }
 
 .tb-btn.danger:not(:disabled) {

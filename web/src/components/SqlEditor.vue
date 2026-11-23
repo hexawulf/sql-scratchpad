@@ -145,7 +145,7 @@ function buildThemeExtension(theme: 'light' | 'dark') {
           color: 'var(--text-primary)',
         },
         '.cm-tooltip-autocomplete > ul > li[aria-selected]': {
-          backgroundColor: 'var(--accent)',
+          backgroundColor: 'var(--accent-fill)',
           color: 'var(--accent-text)',
         },
         ...(isDark

@@ -2,6 +2,32 @@
 
 All notable changes to SQL Scratchpad are documented in this file.
 
+## [0.3.7] - 2026-11-23
+
+### Changed
+
+- **0xWulf teal accent:** the accent palette and favicons move from blue to teal (`#14B8A6` dark / `#0D9488` light).
+- **Toolbar layout:** the toolbar wraps on narrow screens instead of clipping. At 390 px, Format, Session and About were unreachable. The dataset picker shows only the title (`Sample: Library`). The **Transaction open** badge moves into the Query pane header, so opening a transaction no longer wraps the toolbar to a second row. **About** moves to the end of the toolbar.
+- **Result grid:** numeric columns get less width and text columns more, so titles are no longer truncated next to wide id and year columns.
+- **Smaller bundle:** the SQL formatter bundles only the MariaDB dialect (JS 838 KB → 638 KB, gzip 265 KB → 208 KB). Formatting output is unchanged.
+
+### Fixed
+
+- **About dialog:** the dialog body was transparent because it used an undefined colour token, so the result grid showed through the text.
+- **Font CSP errors:** the cyrillic-ext and vietnamese JetBrains Mono subsets were inlined as `data:` URIs, which the CSP (`default-src 'self'`) blocks. They now ship as font files.
+- **Dark-mode primary buttons:** button text is now dark on the teal accent (5.8:1 contrast, 9.8:1 on hover). White text was 2.5:1 and 1.5:1.
+- **Maintenance banner:** now uses the theme-aware danger colours instead of hard-coded light-mode reds.
+- **Schema tree:** the PK/FK badges no longer use emoji, which showed as boxes without an emoji font. The expired-workspace notice's close button now has an accessible name.
+- **Wording:** internal milestone codes (M5, M6) are gone from the engine picker and the Exercises tab.
+
+### Removed
+
+- The unused `autocannon` dev dependency, the unused `@types/sql.js`, and the dead `web/src/index.ts`. `sql.js` moves from the web package to root dev tooling: only `scripts/verify-seeds.ts` uses it, and it was never in the bundle.
+
+### CI
+
+- CI now runs `pnpm format:check`. 17 files had drifted from Prettier style and are reformatted.
+
 ## [0.3.6] - 2026-11-22
 
 ### Changed

@@ -50,9 +50,9 @@ export class WorkspaceExpiredError extends ApiHttpError {
   }
 }
 
-export type FetchLike = typeof fetch;
+type FetchLike = typeof fetch;
 
-export interface MariaDbAdapterOptions {
+interface MariaDbAdapterOptions {
   baseUrl?: string;
   fetchImpl?: FetchLike;
   initialWsId?: string | null;

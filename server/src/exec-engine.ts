@@ -108,7 +108,7 @@ export function stripCommentsAndLiterals(sql: string): string {
  * (`--`, `#`, `/* ... *\/`) while preserving executable conditional comments
  * (`/*! ... *\/`) and counting the exact number of skipped newlines.
  */
-export function stripLeadingNonConditionalComments(sql: string): {
+function stripLeadingNonConditionalComments(sql: string): {
   sql: string;
   skippedNewlines: number;
 } {

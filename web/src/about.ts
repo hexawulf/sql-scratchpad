@@ -1,5 +1,5 @@
-export const SOURCE_URL = 'https://github.com/hexawulf/sql-scratchpad';
-export const SISTER_PROJECT_URL = 'https://py-scratchpad.com';
+const SOURCE_URL = 'https://github.com/hexawulf/sql-scratchpad';
+const SISTER_PROJECT_URL = 'https://py-scratchpad.com';
 
 export const ABOUT_INFO = {
   tagline: 'SQL Scratchpad — a Letos-style SQL playground (MariaDB + SQLite)',

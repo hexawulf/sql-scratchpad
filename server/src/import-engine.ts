@@ -72,7 +72,7 @@ export class ImportByteBudget {
  * Strip leading whitespace and non-conditional comments (--, #, /* ... *\/)
  * while preserving executable conditional comments (/*! ... *\/).
  */
-export function stripLeadingComments(sql: string): string {
+function stripLeadingComments(sql: string): string {
   let i = 0;
   const n = sql.length;
 

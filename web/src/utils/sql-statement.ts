@@ -1,6 +1,6 @@
 import type { StatementResult } from '@sql-scratchpad/shared';
 
-export interface ExtractedStatement {
+interface ExtractedStatement {
   sql: string;
   startLine: number;
   from: number;
@@ -441,7 +441,7 @@ function isReadOnlyStatement(stmt: string): boolean {
   return false;
 }
 
-export interface SqlScriptClassification {
+interface SqlScriptClassification {
   statementCount: number;
   isQueryOnly: boolean;
   isEmpty: boolean;

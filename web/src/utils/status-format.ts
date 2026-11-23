@@ -2,7 +2,7 @@ import type { StatementResult } from '@sql-scratchpad/shared';
 import { ApiHttpError } from '../engines/mariadb';
 import type { StatusLogEntry } from '../types/state';
 
-export function formatTimeHHMMSS(date: Date = new Date()): string {
+function formatTimeHHMMSS(date: Date = new Date()): string {
   const hh = String(date.getHours()).padStart(2, '0');
   const mm = String(date.getMinutes()).padStart(2, '0');
   const ss = String(date.getSeconds()).padStart(2, '0');
@@ -71,7 +71,7 @@ export function formatNoticeLine(
   };
 }
 
-export function formatRetryAfterMinutes(retryAfterSec: number): string {
+function formatRetryAfterMinutes(retryAfterSec: number): string {
   const minutes = Math.max(1, Math.ceil(retryAfterSec / 60));
   return minutes === 1 ? 'try again in 1 minute' : `try again in ${minutes} minutes`;
 }

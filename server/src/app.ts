@@ -43,8 +43,8 @@ const PKG_VERSION: string = (() => {
 })();
 
 export const BODY_LIMIT_BYTES = 256 * 1024;
-export const IMPORT_SQL_MAX_BYTES = 6 * 1024 * 1024;
-export const IMPORT_BODY_LIMIT_BYTES = 7 * 1024 * 1024;
+const IMPORT_SQL_MAX_BYTES = 6 * 1024 * 1024;
+const IMPORT_BODY_LIMIT_BYTES = 7 * 1024 * 1024;
 
 export interface BuildAppOptions {
   config: AppConfig;

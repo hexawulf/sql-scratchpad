@@ -1,7 +1,7 @@
 import { isIP } from 'node:net';
 import { z } from 'zod';
 
-export function isValidIpOrCidr(entry: string): boolean {
+function isValidIpOrCidr(entry: string): boolean {
   const slashIdx = entry.indexOf('/');
   if (slashIdx === -1) {
     return isIP(entry) !== 0;

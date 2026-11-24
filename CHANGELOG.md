@@ -2,6 +2,12 @@
 
 All notable changes to SQL Scratchpad are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Search crawler files and homepage metadata:** `web/public/robots.txt` allows crawling and points at `https://sql-scratchpad.com/sitemap.xml`. `web/public/sitemap.xml` lists `https://sql-scratchpad.com/`. The static server serves them as `text/plain` and `application/xml` instead of the SPA `index.html`. The homepage adds a canonical URL and a meta description.
+
 ## [0.3.7] - 2026-11-23
 
 ### Changed

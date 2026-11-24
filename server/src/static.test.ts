@@ -1,9 +1,12 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CSP_HEADER, registerStaticSpa } from './static.js';
+
+const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../web');
 
 describe('registerStaticSpa', () => {
   let tempDir: string;
@@ -29,6 +32,11 @@ describe('registerStaticSpa', () => {
     writeFileSync(join(tempDir, '.env'), 'SECRET=shouldnotserve\n');
     writeFileSync(join(tempDir, '.git', 'config'), '[core]\n\trepositoryformatversion = 0\n');
     writeFileSync(join(tempDir, 'assets', '.hidden'), 'TOPSECRET\n');
+    writeFileSync(join(tempDir, 'robots.txt'), readFileSync(resolve(webRoot, 'public/robots.txt')));
+    writeFileSync(
+      join(tempDir, 'sitemap.xml'),
+      readFileSync(resolve(webRoot, 'public/sitemap.xml')),
+    );
   });
 
   afterAll(() => {
@@ -96,6 +104,52 @@ describe('registerStaticSpa', () => {
     } finally {
       await app.close();
     }
+  });
+
+  it('serves robots.txt as text/plain and sitemap.xml as XML without SPA fallback', async () => {
+    const app = Fastify();
+    expect(registerStaticSpa(app, tempDir)).toBe(true);
+
+    try {
+      const robots = await app.inject({ method: 'GET', url: '/robots.txt' });
+      expect(robots.statusCode).toBe(200);
+      expect(robots.headers['content-type']).toBe('text/plain; charset=utf-8');
+      expect(robots.headers['content-security-policy']).toBe(CSP_HEADER);
+      expect(robots.headers['x-content-type-options']).toBe('nosniff');
+      expect(robots.body).toContain('User-agent: *');
+      expect(robots.body).toContain('Allow: /');
+      expect(robots.body).toContain('Sitemap: https://sql-scratchpad.com/sitemap.xml');
+      expect(robots.body).not.toContain('<!doctype html>');
+
+      const robotsHead = await app.inject({ method: 'HEAD', url: '/robots.txt' });
+      expect(robotsHead.statusCode).toBe(200);
+      expect(robotsHead.headers['content-type']).toBe('text/plain; charset=utf-8');
+      expect(robotsHead.rawPayload.length).toBe(0);
+
+      const sitemap = await app.inject({ method: 'GET', url: '/sitemap.xml' });
+      expect(sitemap.statusCode).toBe(200);
+      expect(sitemap.headers['content-type']).toBe('application/xml; charset=utf-8');
+      expect(sitemap.headers['content-security-policy']).toBe(CSP_HEADER);
+      expect(sitemap.body).toContain('<?xml version="1.0" encoding="UTF-8"?>');
+      expect(sitemap.body).toContain('xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"');
+      expect(sitemap.body).toContain('<loc>https://sql-scratchpad.com/</loc>');
+      expect(sitemap.body).not.toContain('<!doctype html>');
+
+      const sitemapHead = await app.inject({ method: 'HEAD', url: '/sitemap.xml' });
+      expect(sitemapHead.statusCode).toBe(200);
+      expect(sitemapHead.headers['content-type']).toBe('application/xml; charset=utf-8');
+      expect(sitemapHead.rawPayload.length).toBe(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('homepage HTML publishes a canonical URL and a description', () => {
+    const html = readFileSync(resolve(webRoot, 'index.html'), 'utf8');
+    expect(html).toContain('<link rel="canonical" href="https://sql-scratchpad.com/" />');
+    expect(html).toContain(
+      'content="A lightweight, Letos-style SQL playground in the browser backed by real MariaDB 11.4 LTS isolated workspaces."',
+    );
   });
 
   it('returns false when distDir has no index.html', () => {

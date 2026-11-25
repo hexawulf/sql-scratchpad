@@ -8,3 +8,6 @@ COPY db/init/00-admin-user.sh /docker-entrypoint-initdb.d/00-admin-user.sh
 COPY db/init/10-sample-library.sh /docker-entrypoint-initdb.d/10-sample-library.sh
 COPY seeds/sample-library.sql /opt/sql-scratchpad-seeds/sample-library.sql
 RUN chmod 755 /docker-entrypoint-initdb.d/00-admin-user.sh /docker-entrypoint-initdb.d/10-sample-library.sh ; chmod 644 /opt/sql-scratchpad-seeds/sample-library.sql
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=5 \
+  CMD ["healthcheck.sh", "--connect", "--innodb_initialized"]

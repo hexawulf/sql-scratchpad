@@ -10,7 +10,7 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
-    "@fastify/rate-limit": "^11.2.2",
+    "@fastify/rate-limit": "^11.3.0",
     "@sql-scratchpad/shared": "workspace:*",
     "dbgate-query-splitter": "^4.12.0",
     "dotenv": "^18.0.10",

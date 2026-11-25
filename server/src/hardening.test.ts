@@ -82,6 +82,22 @@ describe('M8-lite hardening unit checks', () => {
     );
     expect(() => parseIpAllowList('192.0.2.0/24')).toThrow();
     expect(() => parseIpAllowList('not-an-ip')).toThrow();
+    // Rejected in production [INFRA-001]
+    expect(() =>
+      loadConfig({
+        ...BASE_ENV,
+        NODE_ENV: 'production',
+        LOADTEST_ALLOW_IPS: '127.0.0.1',
+      }),
+    ).toThrow(/LOADTEST_ALLOW_IPS/);
+    // Allowed in development/test
+    expect(
+      loadConfig({
+        ...BASE_ENV,
+        NODE_ENV: 'development',
+        LOADTEST_ALLOW_IPS: '127.0.0.1',
+      }).LOADTEST_ALLOW_IPS,
+    ).toBe('127.0.0.1');
   });
 
   it('hashes client IPs with a per-process random salt that rotates daily in memory', () => {

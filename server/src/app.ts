@@ -138,6 +138,13 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
 
   app.setErrorHandler(fastifyErrorHandler);
 
+  if (loadtestAllowIps.size > 0) {
+    app.log.warn(
+      { allowlistCount: loadtestAllowIps.size, nodeEnv: config.NODE_ENV },
+      'LOADTEST_ALLOW_IPS is active — rate limits and per-IP workspace caps are bypassed for allowlisted IPs',
+    );
+  }
+
   if (config.MAINTENANCE) {
     app.addHook('onRequest', async (req, reply) => {
       const rawPath = req.url.split('?')[0] ?? '/';

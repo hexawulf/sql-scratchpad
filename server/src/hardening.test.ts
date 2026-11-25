@@ -8,6 +8,7 @@ import {
   IpHasher,
   buildApp,
   checkDenylist,
+  introspectWorkspaceSchema,
   loadConfig,
   normalizeClientIp,
   parseIpAllowList,
@@ -508,5 +509,42 @@ describe('M8-lite hardening unit checks', () => {
     } finally {
       await ctx.app.close();
     }
+  });
+
+  it('runs schema introspection on a single borrowed connection with per-db single-flight deduplication [LOGIC-004]', async () => {
+    let getConnCalls = 0;
+    let releasedCalls = 0;
+    let maxConcurrentQueries = 0;
+    let inFlightQueries = 0;
+
+    const fakePool = {
+      getConnection: async () => {
+        getConnCalls += 1;
+        return {
+          query: async () => {
+            inFlightQueries += 1;
+            maxConcurrentQueries = Math.max(maxConcurrentQueries, inFlightQueries);
+            await new Promise((r) => setTimeout(r, 10));
+            inFlightQueries -= 1;
+            return [[], []];
+          },
+          release: () => {
+            releasedCalls += 1;
+          },
+        };
+      },
+    } as unknown as Pool;
+
+    const [a, b, c] = await Promise.all([
+      introspectWorkspaceSchema(fakePool, 'ws_singleflight1'),
+      introspectWorkspaceSchema(fakePool, 'ws_singleflight1'),
+      introspectWorkspaceSchema(fakePool, 'ws_singleflight1'),
+    ]);
+
+    expect(a).toBe(b);
+    expect(b).toBe(c);
+    expect(getConnCalls).toBe(1);
+    expect(releasedCalls).toBe(1);
+    expect(maxConcurrentQueries).toBe(1);
   });
 });

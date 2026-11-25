@@ -9,7 +9,8 @@ export function createAdminPool(config: AppConfig): Pool {
     password: config.SQLSCRATCHPAD_ADMIN_PASSWORD,
     connectionLimit: 10,
     waitForConnections: true,
-    queueLimit: 0,
+    queueLimit: 50,
+    connectTimeout: 5_000,
     charset: 'utf8mb4',
     multipleStatements: false,
     enableKeepAlive: true,
@@ -19,7 +20,7 @@ export function createAdminPool(config: AppConfig): Pool {
 
 export async function checkDbHealth(pool: Pool): Promise<boolean> {
   try {
-    await pool.query('SELECT 1');
+    await pool.query({ sql: 'SELECT 1', timeout: 3_000 });
     return true;
   } catch {
     return false;

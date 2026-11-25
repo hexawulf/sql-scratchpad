@@ -29,7 +29,7 @@ export function formatCellText(value: unknown): string {
 
 function escapeTsvCell(value: unknown): string {
   const text = formatCellText(value);
-  return text.replace(/\t/g, ' ').replace(/\r?\n/g, ' ');
+  return text.replace(/\t/g, ' ').replace(/\r\n?|\n/g, ' ');
 }
 
 export function toTsv(columns: ColumnMeta[], rows: unknown[][]): string {
@@ -39,7 +39,9 @@ export function toTsv(columns: ColumnMeta[], rows: unknown[][]): string {
 }
 
 function escapeMdCell(value: unknown): string {
-  return formatCellText(value).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  return formatCellText(value)
+    .replace(/\|/g, '\\|')
+    .replace(/\r\n?|\n/g, ' ');
 }
 
 export function toMarkdownTable(columns: ColumnMeta[], rows: unknown[][]): string {

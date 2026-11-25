@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
+import pino from 'pino';
 import type { Connection, FieldPacket, Pool } from 'mysql2/promise';
 import type { FastifyBaseLogger } from 'fastify';
 import {
@@ -27,7 +29,7 @@ import {
   type PinnedSession,
   type WorkspaceEntry,
 } from './workspace-manager.js';
-import { IpHasher, PINO_REDACT_PATHS, sqlLogMeta } from './logger.js';
+import { IpHasher, PINO_REDACT_PATHS, buildLoggerOptions, sqlLogMeta } from './logger.js';
 
 describe('splitMariaDbStatements', () => {
   it('splits multiple statements and preserves 1-based startLine', () => {
@@ -463,6 +465,32 @@ describe('topoSortTables & helpers', () => {
     expect(m1.sqlLength).toBe(Buffer.byteLength("SELECT '€';", 'utf8'));
     expect(m1.sqlLength).toBe(13);
     expect(m1.sqlSha256).not.toBe(m2.sqlSha256);
+  });
+
+  it('redacts mysql2 sql/sqlMessage/message/stack and password patterns in logged errors [LOGGING-002]', () => {
+    const chunks: string[] = [];
+    const stream = new PassThrough();
+    stream.on('data', (c: Buffer) => chunks.push(c.toString('utf8')));
+    const opts = buildLoggerOptions('error', new IpHasher(), stream);
+    const log = pino(opts, stream);
+
+    const canary = 'SUPER_SECRET_PW_CANARY_8842';
+    const mysqlErr = Object.assign(new Error(`Syntax error near '${canary}'`), {
+      code: 'ER_PARSE_ERROR',
+      errno: 1064,
+      sqlState: '42000',
+      sql: `CREATE USER 'ws_1'@'%' IDENTIFIED BY '${canary}'`,
+      sqlMessage: `You have an error near 'IDENTIFIED BY "${canary}"'`,
+    });
+    log.error({ err: mysqlErr }, 'Simulated DB error');
+
+    const genericErr = new Error(`Failed: IDENTIFIED BY '${canary}' and PASSWORD('${canary}')`);
+    log.error({ err: genericErr }, 'Simulated generic error');
+
+    const output = chunks.join('');
+    expect(output).not.toContain(canary);
+    expect(output).toContain('[REDACTED SQL ERROR]');
+    expect(output).toContain('ER_PARSE_ERROR');
   });
 });
 

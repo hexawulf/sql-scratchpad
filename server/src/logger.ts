@@ -9,10 +9,14 @@ const MAX_LOGGED_URL_LENGTH = 200;
 export const PINO_REDACT_PATHS = [
   'sql',
   '*.sql',
+  '*.*.sql',
+  'err.sqlMessage',
+  '*.sqlMessage',
   'req.body.sql',
   'body.sql',
   'password',
   '*.password',
+  '*.*.password',
   'SQLSCRATCHPAD_ADMIN_PASSWORD',
   'MARIADB_ROOT_PASSWORD',
   'req.headers.authorization',
@@ -210,6 +214,55 @@ export function sanitizeUrlForLog(rawUrl: string): string {
     : redacted;
 }
 
+function scrubSensitiveErrorText(text: string): string {
+  return text
+    .replace(/(IDENTIFIED\s+BY\s+)(?:'[^']*'|"[^"]*"|\S+)/gi, '$1[REDACTED]')
+    .replace(/(PASSWORD\s*\()\s*(?:'[^']*'|"[^"]*"|[^)]*)\)/gi, '$1[REDACTED])');
+}
+
+function serializeErrorSafely(error: unknown): Record<string, unknown> {
+  if (!error || typeof error !== 'object') {
+    return { message: scrubSensitiveErrorText(String(error)) };
+  }
+  const e = error as {
+    name?: string;
+    message?: string;
+    stack?: string;
+    code?: string;
+    errno?: number;
+    sqlState?: string;
+    sql?: unknown;
+    sqlMessage?: unknown;
+  };
+  const isSqlError = e.sql !== undefined || e.sqlMessage !== undefined || e.sqlState !== undefined;
+  const stackFrames =
+    typeof e.stack === 'string'
+      ? e.stack
+          .split('\n')
+          .filter((line) => /^\s+at\s/.test(line))
+          .join('\n')
+      : undefined;
+
+  if (isSqlError) {
+    return {
+      type: e.name ?? 'Error',
+      ...(e.code !== undefined ? { code: e.code } : {}),
+      ...(e.errno !== undefined ? { errno: e.errno } : {}),
+      ...(e.sqlState !== undefined ? { sqlState: e.sqlState } : {}),
+      message: '[REDACTED SQL ERROR]',
+      ...(stackFrames ? { stack: stackFrames } : {}),
+    };
+  }
+
+  return {
+    type: e.name ?? 'Error',
+    ...(e.code !== undefined ? { code: e.code } : {}),
+    ...(e.errno !== undefined ? { errno: e.errno } : {}),
+    message: scrubSensitiveErrorText(e.message ?? ''),
+    ...(stackFrames ? { stack: stackFrames } : {}),
+  };
+}
+
 export function buildLoggerOptions(
   level: string,
   ipHasher: IpHasher = new IpHasher(),
@@ -223,6 +276,7 @@ export function buildLoggerOptions(
       censor: '[REDACTED]',
     },
     serializers: {
+      err: serializeErrorSafely,
       req(request: FastifyRequest) {
         const params = request.params as { wsId?: unknown } | undefined;
         const wsIdHash =

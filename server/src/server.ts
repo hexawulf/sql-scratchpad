@@ -43,7 +43,22 @@ async function main(): Promise<void> {
   });
 }
 
-main().catch((err) => {
-  console.error(err);
+main().catch((err: unknown) => {
+  const safeErr =
+    err instanceof Error
+      ? {
+          name: err.name,
+          code: (err as { code?: string }).code,
+          message:
+            'sql' in err || 'sqlMessage' in err
+              ? '[REDACTED SQL ERROR]'
+              : err.message
+                  .replace(/(IDENTIFIED\s+BY\s+)(?:'[^']*'|"[^"]*"|\S+)/gi, '$1[REDACTED]')
+                  .replace(/(PASSWORD\s*\()\s*(?:'[^']*'|"[^"]*"|[^)]*)\)/gi, '$1[REDACTED])'),
+        }
+      : { message: 'Fatal startup error' };
+  process.stderr.write(
+    `${JSON.stringify({ level: 'fatal', err: safeErr, msg: 'Startup failed' })}\n`,
+  );
   process.exit(1);
 });

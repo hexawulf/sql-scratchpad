@@ -8,7 +8,7 @@ if [ ! -f "${SEED_FILE}" ]; then
   exit 1
 fi
 
-mariadb --protocol=socket -u root -p"${MARIADB_ROOT_PASSWORD}" -e \
-  "CREATE DATABASE IF NOT EXISTS tpl_sample_library CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-mariadb --protocol=socket -u root -p"${MARIADB_ROOT_PASSWORD}" tpl_sample_library < "${SEED_FILE}"
+printf '%s\n' "CREATE DATABASE IF NOT EXISTS tpl_sample_library CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" \
+  | MYSQL_PWD="${MARIADB_ROOT_PASSWORD}" mariadb --protocol=socket -u root
+MYSQL_PWD="${MARIADB_ROOT_PASSWORD}" mariadb --protocol=socket -u root tpl_sample_library < "${SEED_FILE}"
 echo "tpl_sample_library seeded from ${SEED_FILE}."

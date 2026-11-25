@@ -35,6 +35,11 @@ updates:
       day: monday
       time: '04:00'
       timezone: Asia/Taipei
+    ignore:
+      # Stay on the Node 24 LTS line; major upgrades require planned validation.
+      - dependency-name: node
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: docker
     directory: /db

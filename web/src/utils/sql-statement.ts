@@ -35,7 +35,7 @@ function stripLeadingCommentsAndWhitespace(sql: string): { text: string; leading
       i = nl === -1 ? n : nl + 1;
       continue;
     }
-    if (ch === '/' && sql[i + 1] === '*' && sql[i + 2] !== '!') {
+    if (ch === '/' && sql[i + 1] === '*' && sql[i + 2] !== '!' && !(sql[i + 2] === 'M' && sql[i + 3] === '!')) {
       const end = sql.indexOf('*/', i + 2);
       i = end === -1 ? n : end + 2;
       continue;
@@ -365,15 +365,43 @@ function splitScriptWithDelimiters(rawSql: string): string[] {
   return statements;
 }
 
+function stripTrailingSemicolonsAndWhitespace(s: string): string {
+  let end = s.length;
+  while (end > 0 && (s[end - 1] === ';' || /\s/.test(s[end - 1]!))) {
+    end -= 1;
+  }
+  return s.slice(0, end);
+}
+
+function extractSingleConditionalCommentBody(s: string): string | null {
+  const isMaria = s.startsWith('/*M!');
+  if ((!isMaria && !s.startsWith('/*!')) || !s.endsWith('*/')) {
+    return null;
+  }
+  let i = isMaria ? 4 : 3;
+  const bodyEnd = s.length - 2;
+  while (i < bodyEnd && s.charCodeAt(i) >= 48 && s.charCodeAt(i) <= 57) {
+    i += 1;
+  }
+  const wsStart = i;
+  while (i < bodyEnd && /\s/.test(s[i]!)) {
+    i += 1;
+  }
+  if (i === wsStart || i >= bodyEnd) return null;
+  const body = s.slice(i, bodyEnd);
+  if (body.includes('*/')) return null;
+  const trimmed = body.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 function isSkippableDumpHeader(stmt: string): boolean {
-  const lead = stripLeadingCommentsAndWhitespace(stmt)
-    .text.replace(/;+\s*$/, '')
-    .trim();
-  const condMatch = /^\/\*!\d*\s+([\s\S]+?)\s*\*\/$/.exec(lead);
-  if (condMatch) {
-    const inner = condMatch[1]!.trim();
+  const lead = stripTrailingSemicolonsAndWhitespace(stripLeadingCommentsAndWhitespace(stmt).text);
+  const inner = extractSingleConditionalCommentBody(lead);
+  if (inner !== null) {
     if (/^SET\b/i.test(inner)) return true;
-    if (/^ALTER\s+TABLE\s+[\s\S]+\b(?:DISABLE|ENABLE)\s+KEYS\b/i.test(inner)) return true;
+    if (/^ALTER\s+TABLE\s/i.test(inner) && /\b(?:DISABLE|ENABLE)\s+KEYS\b/i.test(inner)) {
+      return true;
+    }
   }
   const cleaned = stripAllCommentsAndLiterals(stmt).trim();
   if (/^USE\b/i.test(cleaned)) return true;

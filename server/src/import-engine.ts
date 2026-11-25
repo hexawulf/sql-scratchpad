@@ -93,7 +93,7 @@ function stripLeadingComments(sql: string): string {
       while (i < n && sql[i] !== '\n') i += 1;
       continue;
     }
-    if (ch === '/' && next === '*' && sql[i + 2] !== '!') {
+    if (ch === '/' && next === '*' && sql[i + 2] !== '!' && !(sql[i + 2] === 'M' && sql[i + 3] === '!')) {
       i += 2;
       while (i < n && !(sql[i] === '*' && i + 1 < n && sql[i + 1] === '/')) {
         i += 1;
@@ -193,16 +193,42 @@ function isSkippableConditionalSet(innerSql: string): boolean {
  * conditional comment (e.g. /*!50001 CREATE ... VIEW *\/, /*!50003 CREATE TRIGGER *\/)
  * executes as normal SQL.
  */
-export function classifyImportSkip(sql: string): string | null {
-  const leadStripped = stripLeadingComments(sql)
-    .replace(/;+\s*$/, '')
-    .trim();
+function stripTrailingSemicolonsAndWhitespace(s: string): string {
+  let end = s.length;
+  while (end > 0 && (s[end - 1] === ';' || /\s/.test(s[end - 1]!))) {
+    end -= 1;
+  }
+  return s.slice(0, end);
+}
 
-  // Check single conditional-comment statement: /*!NNNNN <inner> */
-  const condMatch = /^\/\*!\d*\s+([\s\S]+?)\s*\*\/$/.exec(leadStripped);
-  if (condMatch) {
-    const inner = condMatch[1]!.trim();
-    if (/^ALTER\s+TABLE\s+[\s\S]+\b(?:DISABLE|ENABLE)\s+KEYS\b/i.test(inner)) {
+function extractSingleConditionalCommentBody(s: string): string | null {
+  const isMaria = s.startsWith('/*M!');
+  if ((!isMaria && !s.startsWith('/*!')) || !s.endsWith('*/')) {
+    return null;
+  }
+  let i = isMaria ? 4 : 3;
+  const bodyEnd = s.length - 2;
+  while (i < bodyEnd && s.charCodeAt(i) >= 48 && s.charCodeAt(i) <= 57) {
+    i += 1;
+  }
+  const wsStart = i;
+  while (i < bodyEnd && /\s/.test(s[i]!)) {
+    i += 1;
+  }
+  if (i === wsStart || i >= bodyEnd) return null;
+  const body = s.slice(i, bodyEnd);
+  if (body.includes('*/')) return null;
+  const trimmed = body.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export function classifyImportSkip(sql: string): string | null {
+  const leadStripped = stripTrailingSemicolonsAndWhitespace(stripLeadingComments(sql));
+
+  // Check single conditional-comment statement: /*!NNNNN <inner> */ or /*M!NNNNN <inner> */
+  const inner = extractSingleConditionalCommentBody(leadStripped);
+  if (inner !== null) {
+    if (/^ALTER\s+TABLE\s/i.test(inner) && /\b(?:DISABLE|ENABLE)\s+KEYS\b/i.test(inner)) {
       return 'Dump ALTER TABLE DISABLE/ENABLE KEYS header skipped';
     }
     if (isSkippableConditionalSet(inner)) {

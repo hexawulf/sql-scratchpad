@@ -102,6 +102,15 @@ describe('sql-statement utilities', () => {
     const emptyMeta = classifySqlScriptForImport('-- only comments\n');
     expect(emptyMeta).toEqual({ statementCount: 0, isQueryOnly: true, isEmpty: true });
   });
+
+  it('handles ReDoS-adversarial conditional comments and trailing semicolons in linear time [INJECTION-001]', () => {
+    const spacesPayload = `/*!40101${' '.repeat(10_000)}SELECT 1`;
+    const semisPayload = `DELIMITER //\nSELECT 1${';'.repeat(20_000)}x //\nDELIMITER ;`;
+    const t0 = performance.now();
+    expect(isQueryOnlyScript(spacesPayload)).toBe(true);
+    expect(isQueryOnlyScript(semisPayload)).toBe(true);
+    expect(performance.now() - t0).toBeLessThan(250);
+  });
 });
 
 describe('status-format (Letos wording)', () => {

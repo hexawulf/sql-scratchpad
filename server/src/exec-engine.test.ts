@@ -305,6 +305,16 @@ describe('import helpers: classifyImportSkip, rewriteDefinerClauses, ImportByteB
       remainingBytes: 100,
     });
   });
+
+  it('classifies ReDoS-adversarial conditional comments and trailing semicolons in linear time [INJECTION-001]', () => {
+    const spacesPayload = `/*!40101${' '.repeat(10_000)}SELECT 1`;
+    const semisPayload = `SELECT 1${';'.repeat(20_000)}x`;
+    const t0 = performance.now();
+    expect(classifyImportSkip(spacesPayload)).toBeNull();
+    expect(classifyImportSkip(semisPayload)).toBeNull();
+    expect(classifyImportSkip('/*M!100000 SET NAMES utf8mb4 */')).not.toBeNull();
+    expect(performance.now() - t0).toBeLessThan(250);
+  });
 });
 
 describe('topoSortTables & helpers', () => {

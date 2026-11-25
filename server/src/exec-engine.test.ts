@@ -720,3 +720,50 @@ describe('Streaming row caps in ExecEngine and ImportEngine [API-002]', () => {
     expect(res.statementsOk).toBe(1);
   });
 });
+
+describe('WorkspaceManager synchronous capacity reservation [LOGIC-002]', () => {
+  it('enforces MAX_WORKSPACES_PER_IP under concurrent createWorkspace calls', async () => {
+    const cfg = loadConfig({
+      SQLSCRATCHPAD_ADMIN_PASSWORD: 'test-password',
+      LOG_LEVEL: 'silent',
+      MAX_WORKSPACES_PER_IP: '2',
+      MAX_WORKSPACES: '10',
+    });
+    const fakeConn = {
+      query: async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        return [[], []];
+      },
+      release: () => {},
+    };
+    const fakePool = {
+      query: async () => {
+        await new Promise((r) => setTimeout(r, 15));
+        return [[], []];
+      },
+      getConnection: async () => fakeConn,
+    } as unknown as Pool;
+    const silentLogger = {
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      debug: () => {},
+    } as unknown as FastifyBaseLogger;
+
+    const wm = new WorkspaceManager(
+      fakePool,
+      cfg,
+      [{ id: 'empty', title: 'Empty', description: 'Empty', tables: [], engines: ['mariadb'] }],
+      silentLogger,
+    );
+
+    const outcomes = await Promise.allSettled(
+      Array.from({ length: 10 }, () => wm.createWorkspace('empty', 'ownerhash1234567', false)),
+    );
+    const fulfilled = outcomes.filter((o) => o.status === 'fulfilled');
+    const rejected = outcomes.filter((o) => o.status === 'rejected');
+    expect(fulfilled).toHaveLength(2);
+    expect(rejected).toHaveLength(8);
+    expect(wm.getWorkspaceCount()).toBe(2);
+  });
+});

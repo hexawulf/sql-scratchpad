@@ -160,6 +160,8 @@ interface SchemaSizeRow extends RowDataPacket {
 
 export class WorkspaceManager {
   private readonly workspaces = new Map<string, WorkspaceEntry>();
+  private readonly pendingByOwner = new Map<string, number>();
+  private pendingTotal = 0;
   private readonly datasetMap: Map<string, DatasetMeta>;
   private janitorTimer: NodeJS.Timeout | null = null;
 
@@ -250,8 +252,9 @@ export class WorkspaceManager {
       }
     }
 
+    const checkNow = Date.now();
     if (ownerIpHash && !bypassPerIpLimit) {
-      let ownedCount = 0;
+      let ownedCount = this.pendingByOwner.get(ownerIpHash) ?? 0;
       let earliestExpiresAt = Infinity;
       for (const existing of this.workspaces.values()) {
         if (existing.ownerIpHash === ownerIpHash) {
@@ -264,7 +267,10 @@ export class WorkspaceManager {
       if (ownedCount >= this.config.MAX_WORKSPACES_PER_IP) {
         const retryAfterSec = Math.max(
           1,
-          Math.ceil((Math.min(earliestExpiresAt, now + this.config.WORKSPACE_TTL_MS) - now) / 1000),
+          Math.ceil(
+            (Math.min(earliestExpiresAt, checkNow + this.config.WORKSPACE_TTL_MS) - checkNow) /
+              1000,
+          ),
         );
         throw new ApiError(
           429,
@@ -275,7 +281,7 @@ export class WorkspaceManager {
       }
     }
 
-    if (this.workspaces.size >= this.config.MAX_WORKSPACES) {
+    if (this.workspaces.size + this.pendingTotal >= this.config.MAX_WORKSPACES) {
       throw new ApiError(
         503,
         'WORKSPACE_LIMIT_REACHED',
@@ -283,54 +289,77 @@ export class WorkspaceManager {
       );
     }
 
-    const totalBytes = await this.getTotalWorkspaceBytes();
-    if (totalBytes >= this.config.MAX_TOTAL_WORKSPACE_BYTES) {
-      throw new ApiError(503, 'STORAGE_BUDGET_EXCEEDED', 'Total workspace storage budget exceeded');
+    // Reserve capacity synchronously before any async DB round-trips to prevent TOCTOU races
+    this.pendingTotal += 1;
+    if (ownerIpHash) {
+      this.pendingByOwner.set(ownerIpHash, (this.pendingByOwner.get(ownerIpHash) ?? 0) + 1);
     }
-
-    const wsId = randomBase32Id(16);
-    const database = randomWorkspaceDbName();
-    const dbUser = database;
-    const password = randomBytes(32).toString('base64url');
 
     try {
-      await this.provisionDbAndUser(database, dbUser, password);
-      if (datasetId !== 'empty') {
-        await this.cloneTemplate(templateDbName(datasetId), database, dbUser, password);
+      const totalBytes = await this.getTotalWorkspaceBytes();
+      if (totalBytes >= this.config.MAX_TOTAL_WORKSPACE_BYTES) {
+        throw new ApiError(
+          503,
+          'STORAGE_BUDGET_EXCEEDED',
+          'Total workspace storage budget exceeded',
+        );
       }
-    } catch (err) {
-      await this.dropDbAndUser(database, dbUser).catch((cleanupErr) => {
-        this.logger.warn({ err: cleanupErr, database }, 'Failed to clean up partial workspace');
-      });
-      throw err;
+
+      const wsId = randomBase32Id(16);
+      const database = randomWorkspaceDbName();
+      const dbUser = database;
+      const password = randomBytes(32).toString('base64url');
+
+      try {
+        await this.provisionDbAndUser(database, dbUser, password);
+        if (datasetId !== 'empty') {
+          await this.cloneTemplate(templateDbName(datasetId), database, dbUser, password);
+        }
+      } catch (err) {
+        await this.dropDbAndUser(database, dbUser).catch((cleanupErr) => {
+          this.logger.warn({ err: cleanupErr, database }, 'Failed to clean up partial workspace');
+        });
+        throw err;
+      }
+
+      const createdAt = Date.now();
+      const absoluteExpiresAt = createdAt + this.config.WORKSPACE_MAX_TTL_MS;
+      const entry: WorkspaceEntry = {
+        wsId,
+        database,
+        dbUser,
+        password,
+        dataset: datasetId,
+        createdAt,
+        lastActiveAt: createdAt,
+        expiresAt: Math.min(createdAt + this.config.WORKSPACE_TTL_MS, absoluteExpiresAt),
+        absoluteExpiresAt,
+        ownerIpHash,
+        sessions: {},
+        sessionLocks: {},
+        sessionWaiters: {},
+        sessionAbort: {},
+        teardownActive: false,
+        deleting: false,
+      };
+      this.workspaces.set(wsId, entry);
+
+      return {
+        wsId,
+        database,
+        expiresAt: new Date(entry.expiresAt).toISOString(),
+      };
+    } finally {
+      this.pendingTotal = Math.max(0, this.pendingTotal - 1);
+      if (ownerIpHash) {
+        const cur = this.pendingByOwner.get(ownerIpHash) ?? 1;
+        if (cur <= 1) {
+          this.pendingByOwner.delete(ownerIpHash);
+        } else {
+          this.pendingByOwner.set(ownerIpHash, cur - 1);
+        }
+      }
     }
-
-    const absoluteExpiresAt = now + this.config.WORKSPACE_MAX_TTL_MS;
-    const entry: WorkspaceEntry = {
-      wsId,
-      database,
-      dbUser,
-      password,
-      dataset: datasetId,
-      createdAt: now,
-      lastActiveAt: now,
-      expiresAt: Math.min(now + this.config.WORKSPACE_TTL_MS, absoluteExpiresAt),
-      absoluteExpiresAt,
-      ownerIpHash,
-      sessions: {},
-      sessionLocks: {},
-      sessionWaiters: {},
-      sessionAbort: {},
-      teardownActive: false,
-      deleting: false,
-    };
-    this.workspaces.set(wsId, entry);
-
-    return {
-      wsId,
-      database,
-      expiresAt: new Date(entry.expiresAt).toISOString(),
-    };
   }
 
   private notifySessionWaiters(ws: WorkspaceEntry, sid: SessionId): void {

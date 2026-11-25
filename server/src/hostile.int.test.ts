@@ -896,7 +896,6 @@ describe('SQL Scratchpad M8-lite hostile corpus & hardening integration (real Ma
       WORKSPACE_TTL_MS: '60000',
       WORKSPACE_MAX_TTL_MS: '120000',
       SESSION_IDLE_TTL_MS: '50',
-      MAX_WORKSPACE_BYTES: '1',
     });
     const janCtx = await buildApp({
       config: janCfg,
@@ -927,7 +926,13 @@ describe('SQL Scratchpad M8-lite hostile corpus & hardening integration (real Ma
         janEntry.sessions.A.lastUsedAt = Date.now() - 10_000;
       }
 
+      // Drop the size cap only for the sweep: /exec now refuses to run on an over-cap
+      // workspace (507 WORKSPACE_STORAGE_LIMIT), so a 1-byte cap from the start would
+      // stop SLEEP(4) before the session is busy. The sweep must still skip truncation.
+      const normalCap = janCfg.MAX_WORKSPACE_BYTES;
+      janCfg.MAX_WORKSPACE_BYTES = 1;
       const sweep = await janCtx.workspaceManager.runJanitorSweep();
+      janCfg.MAX_WORKSPACE_BYTES = normalCap;
       expect(sweep.expiredWorkspaces).toBe(0);
       expect(sweep.closedIdleSessions).toBe(0);
       expect(sweep.truncatedWorkspaces).toBe(0);

@@ -563,4 +563,43 @@ describe('M8-lite hardening unit checks', () => {
     expect(releasedCalls).toBe(1);
     expect(maxConcurrentQueries).toBe(1);
   });
+
+  it('sets hardened CSP and security headers on API responses and early 404/429 responses [WEB-002, WEB-003]', async () => {
+    const cfg = loadConfig(BASE_ENV);
+    const ctx = await buildApp({
+      config: cfg,
+      adminPool: makeMockPool(true),
+      enableRateLimit: false,
+      staticDir,
+    });
+
+    try {
+      const health = await ctx.app.inject({ method: 'GET', url: '/api/health' });
+      expect(health.statusCode).toBe(200);
+      expect(health.headers['content-security-policy']).toBe(
+        "default-src 'none'; frame-ancestors 'none'",
+      );
+      expect(health.headers['x-content-type-options']).toBe('nosniff');
+      expect(health.headers['referrer-policy']).toBe('no-referrer');
+      expect(health.headers['cache-control']).toBe('no-store');
+      expect(health.headers['permissions-policy']).toContain('camera=()');
+      expect(health.headers['cross-origin-opener-policy']).toBe('same-origin');
+      expect(health.headers['cross-origin-resource-policy']).toBe('same-origin');
+
+      const api404 = await ctx.app.inject({ method: 'GET', url: '/api/unknown' });
+      expect(api404.statusCode).toBe(404);
+      expect(api404.headers['content-security-policy']).toBe(
+        "default-src 'none'; frame-ancestors 'none'",
+      );
+      expect(api404.headers['x-content-type-options']).toBe('nosniff');
+
+      const env404 = await ctx.app.inject({ method: 'GET', url: '/.env' });
+      expect(env404.statusCode).toBe(404);
+      expect(env404.headers['x-content-type-options']).toBe('nosniff');
+      expect(env404.headers['content-security-policy']).toContain("base-uri 'none'");
+      expect(env404.headers['content-security-policy']).toContain("form-action 'none'");
+    } finally {
+      await ctx.app.close();
+    }
+  });
 });

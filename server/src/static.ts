@@ -5,7 +5,12 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { formatApiError } from './errors.js';
 
 export const CSP_HEADER =
-  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; frame-ancestors 'none'";
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
+export const API_CSP_HEADER = "default-src 'none'; frame-ancestors 'none'";
+
+export const PERMISSIONS_POLICY_HEADER =
+  'camera=(), microphone=(), geolocation=(), payment=(), usb=(), clipboard-read=()';
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -25,10 +30,34 @@ const MIME_TYPES: Record<string, string> = {
   '.sql': 'application/sql; charset=utf-8',
 };
 
-function applySecurityHeaders(reply: FastifyReply): void {
-  void reply.header('Content-Security-Policy', CSP_HEADER);
-  void reply.header('X-Content-Type-Options', 'nosniff');
-  void reply.header('Referrer-Policy', 'no-referrer');
+export function applySecurityHeaders(
+  reply: FastifyReply,
+  options: { isApi?: boolean; isHttps?: boolean } = {},
+): void {
+  if (!reply.getHeader('content-security-policy')) {
+    void reply.header('Content-Security-Policy', options.isApi ? API_CSP_HEADER : CSP_HEADER);
+  }
+  if (!reply.getHeader('x-content-type-options')) {
+    void reply.header('X-Content-Type-Options', 'nosniff');
+  }
+  if (!reply.getHeader('referrer-policy')) {
+    void reply.header('Referrer-Policy', 'no-referrer');
+  }
+  if (!reply.getHeader('permissions-policy')) {
+    void reply.header('Permissions-Policy', PERMISSIONS_POLICY_HEADER);
+  }
+  if (!reply.getHeader('cross-origin-opener-policy')) {
+    void reply.header('Cross-Origin-Opener-Policy', 'same-origin');
+  }
+  if (!reply.getHeader('cross-origin-resource-policy')) {
+    void reply.header('Cross-Origin-Resource-Policy', 'same-origin');
+  }
+  if (options.isApi && !reply.getHeader('cache-control')) {
+    void reply.header('Cache-Control', 'no-store');
+  }
+  if (options.isHttps && !reply.getHeader('strict-transport-security')) {
+    void reply.header('Strict-Transport-Security', 'max-age=31536000');
+  }
 }
 
 function isRegularFile(filePath: string): boolean {
@@ -64,8 +93,11 @@ export function registerStaticSpa(app: FastifyInstance, distDir: string): boolea
       decodedPath.startsWith('/api/') ||
       decodedPath === '/api'
     ) {
+      applySecurityHeaders(reply, { isApi: true, isHttps: req.protocol === 'https' });
       return reply.code(404).send(formatApiError('NOT_FOUND', 'Route not found'));
     }
+
+    applySecurityHeaders(reply, { isApi: false, isHttps: req.protocol === 'https' });
 
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       return reply.code(404).send(formatApiError('NOT_FOUND', 'Route not found'));

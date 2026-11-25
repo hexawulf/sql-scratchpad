@@ -4,7 +4,12 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CSP_HEADER, registerStaticSpa } from './static.js';
+import {
+  API_CSP_HEADER,
+  CSP_HEADER,
+  PERMISSIONS_POLICY_HEADER,
+  registerStaticSpa,
+} from './static.js';
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../web');
 
@@ -54,6 +59,10 @@ describe('registerStaticSpa', () => {
     expect(indexRes.headers['cache-control']).toBe('no-cache');
     expect(indexRes.headers['content-security-policy']).toBe(CSP_HEADER);
     expect(indexRes.headers['x-content-type-options']).toBe('nosniff');
+    expect(indexRes.headers['referrer-policy']).toBe('no-referrer');
+    expect(indexRes.headers['permissions-policy']).toBe(PERMISSIONS_POLICY_HEADER);
+    expect(indexRes.headers['cross-origin-opener-policy']).toBe('same-origin');
+    expect(indexRes.headers['cross-origin-resource-policy']).toBe('same-origin');
     expect(indexRes.body).toContain('SQL Scratchpad');
 
     const assetRes = await app.inject({ method: 'GET', url: '/assets/app-abc123.js' });
@@ -67,6 +76,9 @@ describe('registerStaticSpa', () => {
 
     const apiMissing = await app.inject({ method: 'GET', url: '/api/nonexistent' });
     expect(apiMissing.statusCode).toBe(404);
+    expect(apiMissing.headers['content-security-policy']).toBe(API_CSP_HEADER);
+    expect(apiMissing.headers['cache-control']).toBe('no-store');
+    expect(apiMissing.headers['x-content-type-options']).toBe('nosniff');
     expect(apiMissing.json()).toEqual({
       error: { code: 'NOT_FOUND', message: 'Route not found' },
     });

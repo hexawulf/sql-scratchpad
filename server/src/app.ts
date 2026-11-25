@@ -28,7 +28,7 @@ import { WorkspaceManager } from './workspace-manager.js';
 import { ExecEngine } from './exec-engine.js';
 import { ImportByteBudget, ImportEngine } from './import-engine.js';
 import { introspectWorkspaceSchema } from './schema-introspector.js';
-import { registerStaticSpa } from './static.js';
+import { applySecurityHeaders, registerStaticSpa } from './static.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_VERSION: string = (() => {
@@ -137,6 +137,22 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
   app.server.maxConnections = 256;
 
   app.setErrorHandler(fastifyErrorHandler);
+
+  app.addHook('onSend', async (req, reply) => {
+    const rawPath = req.url.split('?')[0] ?? '/';
+    let decodedPath = rawPath;
+    try {
+      decodedPath = decodeURIComponent(rawPath);
+    } catch {
+      // Malformed path handled elsewhere; treat as non-API unless rawPath starts with /api
+    }
+    const isApi =
+      rawPath === '/api' ||
+      rawPath.startsWith('/api/') ||
+      decodedPath === '/api' ||
+      decodedPath.startsWith('/api/');
+    applySecurityHeaders(reply, { isApi, isHttps: req.protocol === 'https' });
+  });
 
   if (loadtestAllowIps.size > 0) {
     app.log.warn(

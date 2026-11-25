@@ -202,6 +202,16 @@ describe('stripCommentsAndLiterals & checkDenylist', () => {
       'SELECT FROM T',
     );
   });
+
+  it('evaluates CREATE FUNCTION ... SONAME denylist rule in linear time [INJECTION-002]', () => {
+    const hostile = 'CREATE FUNCTION '.repeat(5_000);
+    const t0 = performance.now();
+    expect(checkDenylist(hostile, 'ws_111111111111')).toBeNull();
+    expect(performance.now() - t0).toBeLessThan(200);
+    expect(
+      checkDenylist("CREATE OR REPLACE AGGREGATE FUNCTION f RETURNS INT SONAME 'x.so'", 'ws_111111111111'),
+    ).toContain('SONAME');
+  });
 });
 
 describe('import helpers: classifyImportSkip, rewriteDefinerClauses, ImportByteBudget', () => {

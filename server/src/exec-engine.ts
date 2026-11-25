@@ -177,7 +177,11 @@ export function splitMariaDbStatements(sql: string): SplitStatement[] {
   return result;
 }
 
-const DENYLIST_RULES: Array<{ pattern: RegExp; message: string }> = [
+type DenylistRule =
+  | { pattern: RegExp; message: string }
+  | { test: (cleaned: string) => boolean; message: string };
+
+const DENYLIST_RULES: DenylistRule[] = [
   {
     pattern: /\bGRANT\b/i,
     message:
@@ -206,7 +210,9 @@ const DENYLIST_RULES: Array<{ pattern: RegExp; message: string }> = [
     message: 'Not available in the playground: plugin management is disabled.',
   },
   {
-    pattern: /\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:AGGREGATE\s+)?FUNCTION\b[\s\S]*\bSONAME\b/i,
+    test: (cleaned) =>
+      /\bSONAME\b/i.test(cleaned) &&
+      /\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:AGGREGATE\s+)?FUNCTION\b/i.test(cleaned),
     message: 'Not available in the playground: native UDF loading (SONAME) is disabled.',
   },
   {
@@ -232,7 +238,8 @@ export function checkDenylist(sql: string, workspaceDb: string): string | null {
   const cleaned = stripCommentsAndLiterals(sql);
 
   for (const rule of DENYLIST_RULES) {
-    if (rule.pattern.test(cleaned)) {
+    const matched = 'pattern' in rule ? rule.pattern.test(cleaned) : rule.test(cleaned);
+    if (matched) {
       return rule.message;
     }
   }

@@ -9,6 +9,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { DatasetMeta, SessionId } from '@sql-scratchpad/shared';
 import type { AppConfig } from './config.js';
 import { ApiError } from './errors.js';
+import { IpHasher } from './logger.js';
 
 const BASE32_ALPHABET = 'abcdefghijklmnopqrstuvwxyz234567';
 
@@ -166,13 +167,21 @@ export class WorkspaceManager {
   private readonly datasetMap: Map<string, DatasetMeta>;
   private janitorTimer: NodeJS.Timeout | null = null;
 
+  private readonly ipHasher: IpHasher;
+
   constructor(
     private readonly adminPool: Pool,
     private readonly config: AppConfig,
     datasets: DatasetMeta[],
     private readonly logger: FastifyBaseLogger,
+    ipHasher: IpHasher = new IpHasher(),
   ) {
     this.datasetMap = new Map(datasets.map((d) => [d.id, d]));
+    this.ipHasher = ipHasher;
+  }
+
+  private logWsId(wsId: string): string {
+    return this.ipHasher.tokenHash(wsId);
   }
 
   getWorkspaceCount(): number {
@@ -454,7 +463,7 @@ export class WorkspaceManager {
           pending.map((sid) =>
             this.killSessionThread(ws, sid).catch((err) => {
               this.logger.warn(
-                { err, wsId: ws.wsId, session: sid },
+                { err, wsIdHash: this.logWsId(ws.wsId), session: sid },
                 'KILL QUERY during teardown failed',
               );
             }),
@@ -814,18 +823,26 @@ export class WorkspaceManager {
         if (ws.teardownActive || ws.deleting) continue;
         if (!pastAbsolute && this.isWorkspaceBusy(ws)) {
           this.logger.debug(
-            { wsId, database: ws.database },
+            { wsIdHash: this.logWsId(wsId), database: ws.database },
             'Skipping expired workspace with busy session until next janitor sweep',
           );
           continue;
         }
         const reason = pastAbsolute ? 'absolute_ttl' : 'idle_ttl';
-        this.logger.info({ wsId, database: ws.database, reason }, 'Expiring workspace');
+        this.logger.info(
+          {
+            event: 'workspace.expire',
+            wsIdHash: this.logWsId(wsId),
+            database: ws.database,
+            reason,
+          },
+          'Expiring workspace',
+        );
         try {
           await this.deleteWorkspace(wsId);
           expiredWorkspaces += 1;
         } catch (err) {
-          this.logger.warn({ err, wsId }, 'Failed to expire workspace');
+          this.logger.warn({ err, wsIdHash: this.logWsId(wsId) }, 'Failed to expire workspace');
         }
       }
     }
@@ -852,7 +869,7 @@ export class WorkspaceManager {
             if (inTx) {
               await session.conn.query('ROLLBACK');
               this.logger.info(
-                { wsId: ws.wsId, session: sid },
+                { wsIdHash: this.logWsId(ws.wsId), session: sid },
                 'Rolled back idle open transaction',
               );
             }
@@ -877,14 +894,22 @@ export class WorkspaceManager {
       const bytes = sizes.get(ws.database) ?? 0;
       if (bytes > this.config.MAX_WORKSPACE_BYTES) {
         this.logger.warn(
-          { wsId: ws.wsId, database: ws.database, bytes, cap: this.config.MAX_WORKSPACE_BYTES },
+          {
+            wsIdHash: this.logWsId(ws.wsId),
+            database: ws.database,
+            bytes,
+            cap: this.config.MAX_WORKSPACE_BYTES,
+          },
           'Workspace exceeded size cap; interrupting active sessions and re-provisioning',
         );
         try {
           await this.resetWorkspace(ws.wsId, ws.dataset);
           truncatedWorkspaces += 1;
         } catch (err) {
-          this.logger.error({ err, wsId: ws.wsId }, 'Failed to reset oversized workspace');
+          this.logger.error(
+            { err, wsIdHash: this.logWsId(ws.wsId) },
+            'Failed to reset oversized workspace',
+          );
         }
       }
     }

@@ -27,7 +27,7 @@ import {
   type PinnedSession,
   type WorkspaceEntry,
 } from './workspace-manager.js';
-import { PINO_REDACT_PATHS, sqlLogMeta } from './logger.js';
+import { IpHasher, PINO_REDACT_PATHS, sqlLogMeta } from './logger.js';
 
 describe('splitMariaDbStatements', () => {
   it('splits multiple statements and preserves 1-based startLine', () => {
@@ -454,6 +454,15 @@ describe('topoSortTables & helpers', () => {
     expect(PINO_REDACT_PATHS).toContain('sql');
     expect(PINO_REDACT_PATHS).toContain('req.body.sql');
     expect(PINO_REDACT_PATHS).toContain('password');
+
+    // Keyed HMAC-SHA-256 + UTF-8 byte length (multibyte char = 3 bytes, not 1 UTF-16 unit) [LOGGING-005]
+    const h1 = new IpHasher(new Date('2026-11-25T10:00:00Z'));
+    const h2 = new IpHasher(new Date('2026-11-25T10:00:00Z'));
+    const m1 = sqlLogMeta("SELECT '€';", h1);
+    const m2 = sqlLogMeta("SELECT '€';", h2);
+    expect(m1.sqlLength).toBe(Buffer.byteLength("SELECT '€';", 'utf8'));
+    expect(m1.sqlLength).toBe(13);
+    expect(m1.sqlSha256).not.toBe(m2.sqlSha256);
   });
 });
 

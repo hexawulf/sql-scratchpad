@@ -1,7 +1,10 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { isIP, isIPv4 } from 'node:net';
 import type { FastifyRequest } from 'fastify';
 import type { LoggerOptions } from 'pino';
+
+const PROCESS_SQL_LOG_KEY = randomBytes(32);
+const MAX_LOGGED_URL_LENGTH = 200;
 
 export const PINO_REDACT_PATHS = [
   'sql',
@@ -143,12 +146,16 @@ export class IpHasher {
     this.ipv6PrefixBits = ipv6PrefixBits;
   }
 
-  hash(ip: string, now: Date = new Date()): string {
+  private rotateLogSaltIfNeeded(now: Date): void {
     const day = utcDayKey(now);
     if (day !== this.currentDay) {
       this.currentDay = day;
       this.logSalt = randomBytes(32);
     }
+  }
+
+  hash(ip: string, now: Date = new Date()): string {
+    this.rotateLogSaltIfNeeded(now);
     const normalized = normalizeClientIp(ip, this.ipv6PrefixBits);
     return createHash('sha256')
       .update(this.logSalt)
@@ -167,6 +174,40 @@ export class IpHasher {
       .digest('hex')
       .slice(0, 16);
   }
+
+  /**
+   * Non-reversible short digest of a workspace capability token (wsId) for logs,
+   * keyed with the daily-rotated in-memory logSalt.
+   */
+  tokenHash(token: string, now: Date = new Date()): string {
+    this.rotateLogSaltIfNeeded(now);
+    return createHmac('sha256', this.logSalt)
+      .update('wsId\0')
+      .update(token)
+      .digest('hex')
+      .slice(0, 8);
+  }
+
+  /**
+   * Keyed, truncated HMAC-SHA-256 digest of SQL batches/imports for logs so identical
+   * queries cannot be confirmed offline or correlated across UTC days.
+   */
+  sqlHash(sql: string, now: Date = new Date()): string {
+    this.rotateLogSaltIfNeeded(now);
+    return createHmac('sha256', this.logSalt)
+      .update('sql\0')
+      .update(sql)
+      .digest('hex')
+      .slice(0, 16);
+  }
+}
+
+export function sanitizeUrlForLog(rawUrl: string): string {
+  const pathOnly = rawUrl.split('?')[0] ?? '/';
+  const redacted = pathOnly.replace(/(\/api\/workspaces\/)[^/]+/i, '$1[REDACTED]');
+  return redacted.length > MAX_LOGGED_URL_LENGTH
+    ? `${redacted.slice(0, MAX_LOGGED_URL_LENGTH)}...`
+    : redacted;
 }
 
 export function buildLoggerOptions(
@@ -183,19 +224,32 @@ export function buildLoggerOptions(
     },
     serializers: {
       req(request: FastifyRequest) {
+        const params = request.params as { wsId?: unknown } | undefined;
+        const wsIdHash =
+          typeof params?.wsId === 'string' && params.wsId.length > 0
+            ? ipHasher.tokenHash(params.wsId)
+            : undefined;
         return {
           method: request.method,
-          url: request.url,
+          ...(request.routeOptions?.url ? { route: request.routeOptions.url } : {}),
+          url: sanitizeUrlForLog(request.url),
           clientIpHash: ipHasher.hash(request.ip || 'unknown'),
+          ...(wsIdHash ? { wsIdHash } : {}),
         };
       },
     },
   };
 }
 
-export function sqlLogMeta(sql: string): { sqlLength: number; sqlSha256: string } {
+export function sqlLogMeta(
+  sql: string,
+  ipHasher?: IpHasher,
+): { sqlLength: number; sqlSha256: string } {
+  const sqlSha256 = ipHasher
+    ? ipHasher.sqlHash(sql)
+    : createHmac('sha256', PROCESS_SQL_LOG_KEY).update(sql).digest('hex').slice(0, 16);
   return {
-    sqlLength: sql.length,
-    sqlSha256: createHash('sha256').update(sql).digest('hex').slice(0, 16),
+    sqlLength: Buffer.byteLength(sql, 'utf8'),
+    sqlSha256,
   };
 }

@@ -697,4 +697,56 @@ describe('M8-lite hardening unit checks', () => {
       await ctx.app.close();
     }
   });
+
+  it('redacts wsId, strips query strings, truncates long URLs, and quiets loopback /api/health [LOGGING-001, LOGGING-006]', async () => {
+    const chunks: string[] = [];
+    const logStream = new PassThrough();
+    logStream.on('data', (chunk: Buffer) => chunks.push(chunk.toString('utf8')));
+
+    const cfg = loadConfig({ ...BASE_ENV, LOG_LEVEL: 'info' });
+    const ctx = await buildApp({
+      config: cfg,
+      adminPool: makeMockPool(true),
+      enableRateLimit: false,
+      staticDir,
+      logStream,
+    });
+
+    const fakeWsId = 'abcdefghijklmnopqrstuvwxyz';
+    const secretQuery = 'secret_query_canary_999';
+    const longTail = 'z'.repeat(300);
+
+    try {
+      // Loopback healthcheck should not emit request logs
+      const healthLoopback = await ctx.app.inject({
+        method: 'GET',
+        url: '/api/health',
+        remoteAddress: '127.0.0.1',
+      });
+      expect(healthLoopback.statusCode).toBe(200);
+      expect(chunks.join('')).toBe('');
+
+      // Workspace request with wsId + query string
+      await ctx.app.inject({
+        method: 'GET',
+        url: `/api/workspaces/${fakeWsId}/schema?q=${secretQuery}`,
+        remoteAddress: '203.0.113.50',
+      });
+      // Overlong URL path
+      await ctx.app.inject({
+        method: 'GET',
+        url: `/api/${longTail}`,
+        remoteAddress: '203.0.113.50',
+      });
+    } finally {
+      await ctx.app.close();
+    }
+
+    const rawLogs = chunks.join('');
+    expect(rawLogs).not.toContain(fakeWsId);
+    expect(rawLogs).not.toContain(secretQuery);
+    expect(rawLogs).not.toContain(longTail);
+    expect(rawLogs).toContain('/api/workspaces/[REDACTED]/schema');
+    expect(rawLogs).toContain('"wsIdHash"');
+  });
 });

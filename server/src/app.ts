@@ -127,8 +127,17 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
   const ipHasher = options.ipHasher ?? new IpHasher(new Date(), config.IPV6_PREFIX_BITS);
   const loadtestAllowIps = parseIpAllowList(config.LOADTEST_ALLOW_IPS);
 
+  const isLoopbackIp = (ip: string | undefined): boolean => {
+    const unwrapped = unwrapMappedIpv4(ip || '');
+    return unwrapped === '127.0.0.1' || unwrapped === '::1';
+  };
+
   const app = Fastify({
     logger: buildLoggerOptions(config.LOG_LEVEL, ipHasher, options.logStream),
+    disableRequestLogging: (req) => {
+      const pathOnly = req.url.split('?')[0] ?? '/';
+      return pathOnly === '/api/health' && isLoopbackIp(req.ip);
+    },
     bodyLimit: BODY_LIMIT_BYTES,
     trustProxy: parseTrustProxy(config.TRUST_PROXY),
     connectionTimeout: 30_000,
@@ -264,7 +273,7 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     });
   }
 
-  const workspaceManager = new WorkspaceManager(adminPool, config, datasets, app.log);
+  const workspaceManager = new WorkspaceManager(adminPool, config, datasets, app.log, ipHasher);
   const execEngine = new ExecEngine(workspaceManager, config);
   const importEngine = new ImportEngine(workspaceManager, config);
   const importByteBudget = new ImportByteBudget(config.IMPORT_BYTE_BUDGET_PER_HOUR);
@@ -317,11 +326,6 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
         });
     }
     return healthInFlight;
-  };
-
-  const isLoopbackIp = (ip: string | undefined): boolean => {
-    const unwrapped = unwrapMappedIpv4(ip || '');
-    return unwrapped === '127.0.0.1' || unwrapped === '::1';
   };
 
   app.get(
@@ -411,9 +415,9 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
       };
       req.log.info(
         {
-          wsId: req.params.wsId,
+          wsIdHash: ipHasher.tokenHash(req.params.wsId),
           session: execReq.session,
-          ...sqlLogMeta(execReq.sql),
+          ...sqlLogMeta(execReq.sql, ipHasher),
         },
         'Executing SQL batch',
       );
@@ -518,9 +522,9 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
       };
       req.log.info(
         {
-          wsId: req.params.wsId,
+          wsIdHash: ipHasher.tokenHash(req.params.wsId),
           mode: importReq.mode,
-          ...sqlLogMeta(importReq.sql),
+          ...sqlLogMeta(importReq.sql, ipHasher),
         },
         'Importing SQL file',
       );

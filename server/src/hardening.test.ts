@@ -650,4 +650,51 @@ describe('M8-lite hardening unit checks', () => {
       await ctx.app.close();
     }
   });
+
+  it('caches /api/health DB probes and rate-limits /api/health and /api/datasets [API-005]', async () => {
+    let dbQueries = 0;
+    const countingPool = {
+      query: async () => {
+        dbQueries += 1;
+        return [[{ 1: 1 }], []];
+      },
+      end: async () => {},
+    } as unknown as Pool;
+
+    const cfg = loadConfig(BASE_ENV);
+    const ctx = await buildApp({
+      config: cfg,
+      adminPool: countingPool,
+      enableRateLimit: true,
+      staticDir,
+    });
+
+    try {
+      for (let i = 0; i < 5; i += 1) {
+        const res = await ctx.app.inject({
+          method: 'GET',
+          url: '/api/health',
+          remoteAddress: '198.51.100.88',
+        });
+        expect(res.statusCode).toBe(200);
+      }
+      expect(dbQueries).toBe(1);
+
+      let datasets429 = false;
+      for (let i = 0; i < 65; i += 1) {
+        const res = await ctx.app.inject({
+          method: 'GET',
+          url: '/api/datasets',
+          remoteAddress: '198.51.100.89',
+        });
+        if (res.statusCode === 429) {
+          datasets429 = true;
+          break;
+        }
+      }
+      expect(datasets429).toBe(true);
+    } finally {
+      await ctx.app.close();
+    }
+  });
 });

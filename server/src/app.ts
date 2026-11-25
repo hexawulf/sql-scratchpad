@@ -47,6 +47,7 @@ const IMPORT_SQL_MAX_BYTES = 6 * 1024 * 1024;
 const IMPORT_BODY_LIMIT_BYTES = 7 * 1024 * 1024;
 const MAX_CONCURRENT_IMPORTS_GLOBAL = 2;
 const MAX_CONCURRENT_IMPORTS_PER_IP = 1;
+const HEALTH_CACHE_TTL_MS = 2_000;
 
 export interface BuildAppOptions {
   config: AppConfig;
@@ -298,27 +299,73 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     workspaceManager.startJanitor();
   }
 
-  app.get('/api/health', async (_req, reply) => {
-    const dbOk = await checkDbHealth(adminPool);
-    if (config.MAINTENANCE) {
+  let cachedHealth: { ok: boolean; expiresAt: number } | null = null;
+  let healthInFlight: Promise<boolean> | null = null;
+  const getCachedDbHealth = async (): Promise<boolean> => {
+    const now = Date.now();
+    if (cachedHealth && now < cachedHealth.expiresAt) {
+      return cachedHealth.ok;
+    }
+    if (!healthInFlight) {
+      healthInFlight = checkDbHealth(adminPool)
+        .then((ok) => {
+          cachedHealth = { ok, expiresAt: Date.now() + HEALTH_CACHE_TTL_MS };
+          return ok;
+        })
+        .finally(() => {
+          healthInFlight = null;
+        });
+    }
+    return healthInFlight;
+  };
+
+  const isLoopbackIp = (ip: string | undefined): boolean => {
+    const unwrapped = unwrapMappedIpv4(ip || '');
+    return unwrapped === '127.0.0.1' || unwrapped === '::1';
+  };
+
+  app.get(
+    '/api/health',
+    {
+      config: rateLimitEnabled
+        ? {
+            rateLimit: {
+              max: 60,
+              timeWindow: '1 minute',
+              allowList: (req) =>
+                isLoopbackIp(req.ip) || loadtestAllowIps.has(unwrapMappedIpv4(req.ip || '')),
+            },
+          }
+        : undefined,
+    },
+    async (_req, reply) => {
+      const dbOk = await getCachedDbHealth();
+      if (config.MAINTENANCE) {
+        const body: HealthResponse = {
+          status: 'maintenance',
+          db: dbOk ? 'ok' : 'error',
+          version: PKG_VERSION,
+        };
+        return reply.code(200).send(body);
+      }
       const body: HealthResponse = {
-        status: 'maintenance',
+        status: dbOk ? 'ok' : 'degraded',
         db: dbOk ? 'ok' : 'error',
         version: PKG_VERSION,
       };
-      return reply.code(200).send(body);
-    }
-    const body: HealthResponse = {
-      status: dbOk ? 'ok' : 'degraded',
-      db: dbOk ? 'ok' : 'error',
-      version: PKG_VERSION,
-    };
-    return reply.code(dbOk ? 200 : 503).send(body);
-  });
+      return reply.code(dbOk ? 200 : 503).send(body);
+    },
+  );
 
-  app.get('/api/datasets', async () => {
-    return datasets;
-  });
+  app.get(
+    '/api/datasets',
+    {
+      config: rateLimitEnabled ? { rateLimit: { max: 60, timeWindow: '1 minute' } } : undefined,
+    },
+    async () => {
+      return datasets;
+    },
+  );
 
   app.post<{ Body: CreateWorkspaceRequest }>(
     '/api/workspaces',

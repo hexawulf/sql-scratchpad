@@ -70,7 +70,12 @@ const EnvSchema = z
     DB_HOST: z.string().min(1).default('127.0.0.1'),
     DB_PORT: z.coerce.number().int().min(1).max(65535).default(3307),
     DB_ADMIN_USER: z.string().min(1).default('scratchpad_admin'),
-    SQLSCRATCHPAD_ADMIN_PASSWORD: z.string().min(1, 'SQLSCRATCHPAD_ADMIN_PASSWORD is required'),
+    SQLSCRATCHPAD_ADMIN_PASSWORD: z
+      .string()
+      .min(1, 'SQLSCRATCHPAD_ADMIN_PASSWORD is required')
+      .refine((val) => !/^(?:replace-with-|changeme$|change-me$|password$)/i.test(val.trim()), {
+        message: 'SQLSCRATCHPAD_ADMIN_PASSWORD must not use a placeholder value',
+      }),
 
     WORKSPACE_TTL_MS: z.coerce
       .number()

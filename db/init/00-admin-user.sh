@@ -6,6 +6,20 @@ if [ -z "${SQLSCRATCHPAD_ADMIN_PASSWORD:-}" ]; then
   exit 1
 fi
 
+case "${SQLSCRATCHPAD_ADMIN_PASSWORD}" in
+  replace-with-*|REPLACE-WITH-*|changeme|CHANGEME|change-me|CHANGE-ME|password|PASSWORD)
+    echo "ERROR: SQLSCRATCHPAD_ADMIN_PASSWORD is set to an insecure placeholder value" >&2
+    exit 1
+    ;;
+esac
+
+case "${MARIADB_ROOT_PASSWORD:-}" in
+  ''|replace-with-*|REPLACE-WITH-*|changeme|CHANGEME|change-me|CHANGE-ME|password|PASSWORD)
+    echo "ERROR: MARIADB_ROOT_PASSWORD is empty or set to an insecure placeholder value" >&2
+    exit 1
+    ;;
+esac
+
 # Reject CR/LF control characters and escape backslashes before single quotes for SQL string literal
 NL=$(printf '\n_')
 NL=${NL%_}

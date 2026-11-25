@@ -100,6 +100,21 @@ describe('M8-lite hardening unit checks', () => {
     ).toBe('127.0.0.1');
   });
 
+  it('rejects empty and placeholder SQLSCRATCHPAD_ADMIN_PASSWORD values [INFRA-006]', () => {
+    expect(() => loadConfig({ ...BASE_ENV, SQLSCRATCHPAD_ADMIN_PASSWORD: '' })).toThrow(
+      /SQLSCRATCHPAD_ADMIN_PASSWORD/,
+    );
+    expect(() =>
+      loadConfig({
+        ...BASE_ENV,
+        SQLSCRATCHPAD_ADMIN_PASSWORD: 'replace-with-random-admin-password',
+      }),
+    ).toThrow(/placeholder/);
+    expect(() => loadConfig({ ...BASE_ENV, SQLSCRATCHPAD_ADMIN_PASSWORD: 'changeme' })).toThrow(
+      /placeholder/,
+    );
+  });
+
   it('hashes client IPs with a per-process random salt that rotates daily in memory', () => {
     const day1 = new Date('2026-11-19T12:00:00Z');
     const day1Later = new Date('2026-11-19T23:59:59Z');

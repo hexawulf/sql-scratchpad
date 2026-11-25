@@ -22,6 +22,7 @@ jobs:
   test:
     name: Lint, Build, Unit & Integration Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     services:
       mariadb:
@@ -105,6 +106,7 @@ jobs:
   e2e:
     name: E2E Tests (Playwright Chromium)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     services:
       mariadb:

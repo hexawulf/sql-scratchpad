@@ -3,7 +3,7 @@
 # Node 24 LTS (bookworm-slim) multi-arch OCI index (linux/arm64 + linux/amd64)
 FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS base
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-RUN corepack enable ; corepack prepare pnpm@12.21.0 --activate
+RUN corepack enable && corepack prepare pnpm@12.21.0+sha512.66fd8278ee28935ce951792d34367ff3af5c432a2756445823029533835b8da529bbe0be5130afd56ed0713fb8789e47bad82d93bd5ae2fe54b15562d6276ef0 --activate
 
 FROM base AS builder
 WORKDIR /src

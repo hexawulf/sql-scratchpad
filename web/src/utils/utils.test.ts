@@ -203,6 +203,13 @@ describe('export-grid utilities', () => {
       '| genre | book_count |\n| --- | ---: |\n| Fiction | 3 |\n| Science | NULL |',
     );
   });
+
+  it('flattens CR, LF and CRLF line breaks inside cells to one space', () => {
+    const cols = [{ name: 'note', type: 'VARCHAR' }];
+    const rows = [['a\rb'], ['c\r\nd'], ['e\nf']];
+    expect(toTsv(cols, rows)).toBe('note\na b\nc d\ne f');
+    expect(toMarkdownTable(cols, rows)).toBe('| note |\n| --- |\n| a b |\n| c d |\n| e f |');
+  });
 });
 
 describe('storage and session toggle SQL', () => {

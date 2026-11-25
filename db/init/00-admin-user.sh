@@ -18,10 +18,16 @@ case "${SQLSCRATCHPAD_ADMIN_PASSWORD}" in
 esac
 ESCAPED_PWD=$(printf '%s' "${SQLSCRATCHPAD_ADMIN_PASSWORD}" | sed "s/\\\\/\\\\\\\\/g; s/'/''/g")
 
-printf "CREATE USER IF NOT EXISTS 'scratchpad_admin'@'%%' IDENTIFIED BY '%s';
+# Architectural note: MariaDB requires global CREATE USER to provision and drop
+# ephemeral ws_<hex> workspace accounts. Treat scratchpad_admin as a privileged
+# DB administration boundary (isolated to the internal network; never exposed).
+# Remote TCP root ('root'@'%') is explicitly dropped; local socket root remains.
+# Template schemas (tpl_*) grant read-only SELECT + SHOW VIEW (no TRIGGER write).
+printf "DROP USER IF EXISTS 'root'@'%%';
+CREATE USER IF NOT EXISTS 'scratchpad_admin'@'%%' IDENTIFIED BY '%s';
 GRANT CREATE USER, CONNECTION ADMIN ON *.* TO 'scratchpad_admin'@'%%';
 GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, INDEX, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, CREATE TEMPORARY TABLES, LOCK TABLES, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON \`ws\\_%%\`.* TO 'scratchpad_admin'@'%%' WITH GRANT OPTION;
-GRANT SELECT, SHOW VIEW, TRIGGER ON \`tpl\\_%%\`.* TO 'scratchpad_admin'@'%%';
+GRANT SELECT, SHOW VIEW ON \`tpl\\_%%\`.* TO 'scratchpad_admin'@'%%';
 GRANT SELECT (User, Host) ON mysql.user TO 'scratchpad_admin'@'%%';
 FLUSH PRIVILEGES;\n" "${ESCAPED_PWD}" | MYSQL_PWD="${MARIADB_ROOT_PASSWORD}" mariadb --protocol=socket -u root
 echo "scratchpad_admin user provisioned."

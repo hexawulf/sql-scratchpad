@@ -153,10 +153,63 @@ function stripLeadingNonConditionalComments(sql: string): {
   return { sql: sql.slice(i).trim(), skippedNewlines };
 }
 
+const MAX_DELIMITER_LENGTH = 16;
+
+function validateCustomDelimiters(sql: string): void {
+  const n = sql.length;
+  let pos = 0;
+  while (pos < n) {
+    let lineEnd = sql.indexOf('\n', pos);
+    if (lineEnd === -1) lineEnd = n;
+    let i = pos;
+    while (i < lineEnd) {
+      const ch = sql[i]!;
+      if (ch === ' ' || ch === '\t' || ch === '\r') {
+        i += 1;
+        continue;
+      }
+      if (ch === '/' && i + 1 < lineEnd && sql[i + 1] === '*') {
+        const closeIdx = sql.indexOf('*/', i + 2);
+        if (closeIdx === -1 || closeIdx + 2 > lineEnd) break;
+        i = closeIdx + 2;
+        continue;
+      }
+      break;
+    }
+    if (
+      lineEnd - i >= 10 &&
+      (sql[i] === 'D' || sql[i] === 'd') &&
+      sql.slice(i, i + 9).toUpperCase() === 'DELIMITER' &&
+      (sql[i + 9] === ' ' || sql[i + 9] === '\t')
+    ) {
+      const rawToken = sql.slice(i + 10, lineEnd).replace(/\r$/, '').trim();
+      if (rawToken.length > MAX_DELIMITER_LENGTH) {
+        throw new ApiError(
+          400,
+          'INVALID_DELIMITER',
+          `DELIMITER exceeds maximum allowed length of ${MAX_DELIMITER_LENGTH} characters`,
+        );
+      }
+      for (let k = 0; k < rawToken.length; k += 1) {
+        const code = rawToken.charCodeAt(k);
+        if (code < 0x20 || code === 0x7f) {
+          throw new ApiError(
+            400,
+            'INVALID_DELIMITER',
+            'DELIMITER must not contain control characters',
+          );
+        }
+      }
+    }
+    pos = lineEnd + 1;
+  }
+}
+
 export function splitMariaDbStatements(sql: string): SplitStatement[] {
   // Strip UTF-8 BOM before splitting so dbgate-query-splitter does not treat it
   // as a data token on line 1 (which would break line-1 DELIMITER directives).
   const normalized = sql.charCodeAt(0) === 0xfeff ? sql.slice(1) : sql;
+  validateCustomDelimiters(normalized);
   const items = splitQuery(normalized, {
     ...mysqlSplitterOptions,
     returnRichInfo: true,

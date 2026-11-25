@@ -111,6 +111,14 @@ describe('sql-statement utilities', () => {
     expect(isQueryOnlyScript(semisPayload)).toBe(true);
     expect(performance.now() - t0).toBeLessThan(250);
   });
+
+  it('caps custom DELIMITER length to avoid quadratic CPU exhaustion [INJECTION-003]', () => {
+    const longDelim = 'A'.repeat(4000) + 'B';
+    const payload = `DELIMITER ${longDelim}\n${'A'.repeat(16_000)};\nSELECT 1;`;
+    const t0 = performance.now();
+    expect(isQueryOnlyScript(payload)).toBe(false);
+    expect(performance.now() - t0).toBeLessThan(250);
+  });
 });
 
 describe('status-format (Letos wording)', () => {

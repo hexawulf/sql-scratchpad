@@ -144,6 +144,24 @@ describe('splitMariaDbStatements', () => {
     expect(stmts[0]!.sql).toContain('SET NEW.a = 1;');
     expect(stmts[1]).toEqual({ sql: 'SELECT 1', startLine: 7 });
   });
+
+  it('rejects overlong or control-char custom DELIMITER directives [INJECTION-003]', () => {
+    const longDelim = 'A'.repeat(4000) + 'B';
+    const hostile = `DELIMITER ${longDelim}\n${'A'.repeat(16_000)}`;
+    const t0 = performance.now();
+    expect(() => splitMariaDbStatements(hostile)).toThrowError(ApiError);
+    try {
+      splitMariaDbStatements(hostile);
+    } catch (err) {
+      expect(err).toMatchObject({ statusCode: 400, code: 'INVALID_DELIMITER' });
+    }
+    expect(performance.now() - t0).toBeLessThan(100);
+    expect(() => splitMariaDbStatements('DELIMITER a\x00b\nSELECT 1')).toThrowError(ApiError);
+    // Delimiter up to 16 chars remains allowed
+    expect(splitMariaDbStatements('DELIMITER 1234567890123456\nSELECT 1 1234567890123456')).toHaveLength(
+      1,
+    );
+  });
 });
 
 describe('buildImportErrorHint', () => {

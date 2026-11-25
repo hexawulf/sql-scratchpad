@@ -241,6 +241,17 @@ function stripAllCommentsAndLiterals(sql: string): string {
   return out;
 }
 
+const MAX_DELIMITER_LENGTH = 16;
+
+function isValidDelimiterToken(token: string): boolean {
+  if (token.length === 0 || token.length > MAX_DELIMITER_LENGTH) return false;
+  for (let idx = 0; idx < token.length; idx += 1) {
+    const code = token.charCodeAt(idx);
+    if (code < 0x20 || code === 0x7f) return false;
+  }
+  return true;
+}
+
 function splitScriptWithDelimiters(rawSql: string): string[] {
   const sql = rawSql.charCodeAt(0) === 0xfeff ? rawSql.slice(1) : rawSql;
   const statements: string[] = [];
@@ -309,11 +320,15 @@ function splitScriptWithDelimiters(rawSql: string): string[] {
         i += 1;
         continue;
       }
-      const delimMatch = /^DELIMITER[ \t]+([^\r\n]+)/i.exec(sql.slice(i));
+      const nlIdx = sql.indexOf('\n', i);
+      const lineSlice = nlIdx === -1 ? sql.slice(i) : sql.slice(i, nlIdx);
+      const delimMatch = /^DELIMITER[ \t]+([^\r\n]+)/i.exec(lineSlice);
       if (delimMatch) {
         pushChunk(i);
         const nextDelim = delimMatch[1]!.trim();
-        if (nextDelim) delimiter = nextDelim;
+        if (isValidDelimiterToken(nextDelim)) {
+          delimiter = nextDelim;
+        }
         i += delimMatch[0].length;
         if (sql[i] === '\r') i += 1;
         if (sql[i] === '\n') i += 1;

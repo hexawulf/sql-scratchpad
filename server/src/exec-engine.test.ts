@@ -164,6 +164,13 @@ describe('splitMariaDbStatements', () => {
       splitMariaDbStatements('DELIMITER 1234567890123456\nSELECT 1 1234567890123456'),
     ).toHaveLength(1);
   });
+
+  it('fast-rejects scripts exceeding maxStatements before full splitting [API-006]', () => {
+    const huge = 'SELECT 1;\n'.repeat(60_001);
+    const t0 = performance.now();
+    expect(() => splitMariaDbStatements(huge, 60_000)).toThrowError(ApiError);
+    expect(performance.now() - t0).toBeLessThan(250);
+  });
 });
 
 describe('buildImportErrorHint', () => {

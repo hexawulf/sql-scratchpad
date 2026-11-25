@@ -26,9 +26,16 @@ export interface SplitStatement {
  * Strip SQL comments and string literals (replacing them with spaces) for safe denylist inspection.
  */
 export function stripCommentsAndLiterals(sql: string, backslashEscapes = true): string {
-  let out = '';
+  const parts: string[] = [];
+  let segStart = 0;
   let i = 0;
   const n = sql.length;
+
+  const flushUpTo = (end: number): void => {
+    if (end > segStart) {
+      parts.push(sql.slice(segStart, end));
+    }
+  };
 
   while (i < n) {
     const ch = sql[i]!;
@@ -36,34 +43,41 @@ export function stripCommentsAndLiterals(sql: string, backslashEscapes = true): 
 
     // Single-line -- comment
     if (ch === '-' && next === '-' && (i + 2 >= n || /\s/.test(sql[i + 2]!))) {
+      flushUpTo(i);
       i += 2;
       while (i < n && sql[i] !== '\n') i += 1;
-      out += ' ';
+      parts.push(' ');
+      segStart = i;
       continue;
     }
 
     // Single-line # comment (MySQL/MariaDB)
     if (ch === '#') {
+      flushUpTo(i);
       i += 1;
       while (i < n && sql[i] !== '\n') i += 1;
-      out += ' ';
+      parts.push(' ');
+      segStart = i;
       continue;
     }
 
     // Block comment /* ... */ (keep executable /*! ... */ and MariaDB /*M! ... */ inspectable)
     if (ch === '/' && next === '*') {
+      flushUpTo(i);
       if (i + 2 < n && sql[i + 2] === '!') {
         // Conditional comment: inspect inner tokens
         i += 3;
         while (i < n && /[0-9]/.test(sql[i]!)) i += 1;
-        out += ' ';
+        parts.push(' ');
+        segStart = i;
         continue;
       }
       if (i + 3 < n && sql[i + 2] === 'M' && sql[i + 3] === '!') {
         // MariaDB-specific executable comment /*M!NNNNN ... */: inspect inner tokens
         i += 4;
         while (i < n && /[0-9]/.test(sql[i]!)) i += 1;
-        out += ' ';
+        parts.push(' ');
+        segStart = i;
         continue;
       }
       i += 2;
@@ -71,19 +85,23 @@ export function stripCommentsAndLiterals(sql: string, backslashEscapes = true): 
         i += 1;
       }
       i += 2;
-      out += ' ';
+      parts.push(' ');
+      segStart = i;
       continue;
     }
 
     // Closing of conditional comment
     if (ch === '*' && next === '/') {
+      flushUpTo(i);
       i += 2;
-      out += ' ';
+      parts.push(' ');
+      segStart = i;
       continue;
     }
 
     // Backtick-quoted identifier (`` doubles literal backtick; backslash is NOT an escape)
     if (ch === '`') {
+      flushUpTo(i);
       const start = i + 1;
       i += 1;
       while (i < n) {
@@ -99,12 +117,14 @@ export function stripCommentsAndLiterals(sql: string, backslashEscapes = true): 
       const inner = sql.slice(start, i);
       if (i < n && sql[i] === '`') i += 1;
       // Preserve simple alphanumeric identifiers (needed for `USE \`db\`` check); neutralize complex ones
-      out += /^[A-Za-z0-9_$-]+$/.test(inner) ? `\`${inner}\`` : ' ';
+      parts.push(/^[A-Za-z0-9_$-]+$/.test(inner) ? `\`${inner}\`` : ' ');
+      segStart = i;
       continue;
     }
 
     // Single-quoted or double-quoted string literal
     if (ch === "'" || ch === '"') {
+      flushUpTo(i);
       const quote = ch;
       i += 1;
       while (i < n) {
@@ -122,15 +142,16 @@ export function stripCommentsAndLiterals(sql: string, backslashEscapes = true): 
         }
         i += 1;
       }
-      out += ' ';
+      parts.push(' ');
+      segStart = i;
       continue;
     }
 
-    out += ch;
     i += 1;
   }
 
-  return out;
+  flushUpTo(n);
+  return parts.join('');
 }
 
 /**
@@ -189,9 +210,10 @@ function stripLeadingNonConditionalComments(sql: string): {
 
 const MAX_DELIMITER_LENGTH = 16;
 
-function validateCustomDelimiters(sql: string): void {
+function validateCustomDelimiters(sql: string): boolean {
   const n = sql.length;
   let pos = 0;
+  let sawDelimiterDirective = false;
   while (pos < n) {
     let lineEnd = sql.indexOf('\n', pos);
     if (lineEnd === -1) lineEnd = n;
@@ -216,6 +238,7 @@ function validateCustomDelimiters(sql: string): void {
       sql.slice(i, i + 9).toUpperCase() === 'DELIMITER' &&
       (sql[i + 9] === ' ' || sql[i + 9] === '\t')
     ) {
+      sawDelimiterDirective = true;
       const rawToken = sql
         .slice(i + 10, lineEnd)
         .replace(/\r$/, '')
@@ -240,13 +263,104 @@ function validateCustomDelimiters(sql: string): void {
     }
     pos = lineEnd + 1;
   }
+  return sawDelimiterDirective;
 }
 
-export function splitMariaDbStatements(sql: string): SplitStatement[] {
+/**
+ * Fast O(N) statement-count pre-check for standard semicolon-delimited scripts (no custom DELIMITER)
+ * that rejects scripts exceeding `maxStatements` before invoking dbgate-query-splitter.
+ */
+function enforceStatementCountPrecheck(sql: string, maxStatements: number): void {
+  const n = sql.length;
+  let i = 0;
+  let count = 0;
+  let hasToken = false;
+
+  while (i < n) {
+    const ch = sql[i]!;
+    const next = i + 1 < n ? sql[i + 1] : '';
+
+    if (ch === ' ' || ch === '\t' || ch === '\r' || ch === '\n') {
+      i += 1;
+      continue;
+    }
+    if (ch === '-' && next === '-' && (i + 2 >= n || /\s/.test(sql[i + 2]!))) {
+      const nl = sql.indexOf('\n', i + 2);
+      i = nl === -1 ? n : nl + 1;
+      continue;
+    }
+    if (ch === '#') {
+      const nl = sql.indexOf('\n', i + 1);
+      i = nl === -1 ? n : nl + 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      if (sql[i + 2] === '!' || (sql[i + 2] === 'M' && sql[i + 3] === '!')) {
+        hasToken = true;
+      }
+      const close = sql.indexOf('*/', i + 2);
+      i = close === -1 ? n : close + 2;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      hasToken = true;
+      const quote = ch;
+      i += 1;
+      while (i < n) {
+        if (quote !== '`' && sql[i] === '\\' && i + 1 < n) {
+          i += 2;
+          continue;
+        }
+        if (sql[i] === quote) {
+          if (i + 1 < n && sql[i + 1] === quote) {
+            i += 2;
+            continue;
+          }
+          i += 1;
+          break;
+        }
+        i += 1;
+      }
+      continue;
+    }
+    if (ch === ';') {
+      if (hasToken) {
+        count += 1;
+        hasToken = false;
+        if (count > maxStatements) {
+          throw new ApiError(
+            400,
+            'TOO_MANY_STATEMENTS',
+            `Script exceeds the limit of ${maxStatements} statements.`,
+          );
+        }
+      }
+      i += 1;
+      continue;
+    }
+    hasToken = true;
+    i += 1;
+  }
+  if (hasToken) {
+    count += 1;
+    if (count > maxStatements) {
+      throw new ApiError(
+        400,
+        'TOO_MANY_STATEMENTS',
+        `Script exceeds the limit of ${maxStatements} statements.`,
+      );
+    }
+  }
+}
+
+export function splitMariaDbStatements(sql: string, maxStatements?: number): SplitStatement[] {
   // Strip UTF-8 BOM before splitting so dbgate-query-splitter does not treat it
   // as a data token on line 1 (which would break line-1 DELIMITER directives).
   const normalized = sql.charCodeAt(0) === 0xfeff ? sql.slice(1) : sql;
-  validateCustomDelimiters(normalized);
+  const hasCustomDelimiter = validateCustomDelimiters(normalized);
+  if (maxStatements !== undefined && !hasCustomDelimiter) {
+    enforceStatementCountPrecheck(normalized, maxStatements);
+  }
   const items = splitQuery(normalized, {
     ...mysqlSplitterOptions,
     returnRichInfo: true,
@@ -621,7 +735,7 @@ export class ExecEngine {
     let responseBytes = 0;
 
     try {
-      const statements = splitMariaDbStatements(req.sql);
+      const statements = splitMariaDbStatements(req.sql, this.config.EXEC_MAX_STATEMENTS);
       if (statements.length > this.config.EXEC_MAX_STATEMENTS) {
         throw new ApiError(
           400,

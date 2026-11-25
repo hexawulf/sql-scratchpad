@@ -546,7 +546,7 @@ export class ImportEngine {
     this.workspaceManager.touchWorkspace(ws);
 
     // Split with DELIMITER support and enforce statement cap before mutating workspace
-    const statements = splitMariaDbStatements(req.sql);
+    const statements = splitMariaDbStatements(req.sql, this.config.IMPORT_MAX_STATEMENTS);
     if (statements.length > this.config.IMPORT_MAX_STATEMENTS) {
       throw new ApiError(
         400,
@@ -602,8 +602,8 @@ export class ImportEngine {
 
       // Batch InnoDB commits for large scripts without explicit ROLLBACK so 20k+ statements
       // complete well within the 75 s wall-clock cap while preserving partial-apply semantics.
-      const hasExplicitRollback = statements.some((s) =>
-        /\bROLLBACK\b/i.test(stripCommentsAndLiterals(s.sql)),
+      const hasExplicitRollback = statements.some(
+        (s) => /\bROLLBACK\b/i.test(s.sql) && /\bROLLBACK\b/i.test(stripCommentsAndLiterals(s.sql)),
       );
       if (!hasExplicitRollback && statements.length > 50) {
         await session.conn.query('SET autocommit = 0');

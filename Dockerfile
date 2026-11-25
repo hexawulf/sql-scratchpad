@@ -43,14 +43,14 @@ ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=5050
 
-COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
-COPY --from=prod-deps --chown=node:node /app/server/node_modules ./server/node_modules
-COPY --from=builder --chown=node:node /src/shared/package.json ./shared/package.json
-COPY --from=builder --chown=node:node /src/shared/dist ./shared/dist
-COPY --from=builder --chown=node:node /src/server/package.json ./server/package.json
-COPY --from=builder --chown=node:node /src/server/datasets.json ./server/datasets.json
-COPY --from=builder --chown=node:node /src/server/dist ./server/dist
-COPY --from=builder --chown=node:node /src/web/dist ./web/dist
+COPY --from=prod-deps /app/node_modules ./node_modules
+COPY --from=prod-deps /app/server/node_modules ./server/node_modules
+COPY --from=builder /src/shared/package.json ./shared/package.json
+COPY --from=builder /src/shared/dist ./shared/dist
+COPY --from=builder /src/server/package.json ./server/package.json
+COPY --from=builder /src/server/datasets.json ./server/datasets.json
+COPY --from=builder /src/server/dist ./server/dist
+COPY --from=builder /src/web/dist ./web/dist
 
 USER node
 EXPOSE 5050

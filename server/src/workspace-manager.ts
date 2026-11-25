@@ -161,6 +161,7 @@ interface SchemaSizeRow extends RowDataPacket {
 export class WorkspaceManager {
   private readonly workspaces = new Map<string, WorkspaceEntry>();
   private readonly pendingByOwner = new Map<string, number>();
+  private readonly inFlightDatabases = new Set<string>();
   private pendingTotal = 0;
   private readonly datasetMap: Map<string, DatasetMeta>;
   private janitorTimer: NodeJS.Timeout | null = null;
@@ -309,6 +310,7 @@ export class WorkspaceManager {
       const database = randomWorkspaceDbName();
       const dbUser = database;
       const password = randomBytes(32).toString('base64url');
+      this.inFlightDatabases.add(database);
 
       try {
         await this.provisionDbAndUser(database, dbUser, password);
@@ -320,6 +322,8 @@ export class WorkspaceManager {
           this.logger.warn({ err: cleanupErr, database }, 'Failed to clean up partial workspace');
         });
         throw err;
+      } finally {
+        this.inFlightDatabases.delete(database);
       }
 
       const createdAt = Date.now();
@@ -503,22 +507,39 @@ export class WorkspaceManager {
 
     ws.teardownActive = true;
     let acquired: SessionId[] = [];
+    let dropped = false;
     try {
       acquired = await this.acquireAllSessionLocksForTeardown(ws, timeoutMs);
       await this.closeAllSessions(ws);
       await this.dropDbAndUser(ws.database, ws.dbUser);
+      dropped = true;
 
       const newPassword = randomBytes(32).toString('base64url');
-      ws.password = newPassword;
-      ws.dataset = datasetId;
-
-      await this.provisionDbAndUser(ws.database, ws.dbUser, ws.password);
+      await this.provisionDbAndUser(ws.database, ws.dbUser, newPassword);
       if (datasetId !== 'empty') {
-        await this.cloneTemplate(templateDbName(datasetId), ws.database, ws.dbUser, ws.password);
+        await this.cloneTemplate(templateDbName(datasetId), ws.database, ws.dbUser, newPassword);
       }
 
+      // Mutate in-memory credentials/dataset only after provisioning succeeds [LOGIC-007]
+      ws.password = newPassword;
+      ws.dataset = datasetId;
       this.touchWorkspace(ws);
       return { database: ws.database };
+    } catch (err) {
+      if (dropped) {
+        // Workspace was already dropped and re-provisioning failed: evict or mark for janitor retry
+        ws.deleting = true;
+        try {
+          await this.dropDbAndUser(ws.database, ws.dbUser);
+          this.workspaces.delete(wsId);
+        } catch (cleanupErr) {
+          this.logger.warn(
+            { err: cleanupErr, database: ws.database },
+            'Failed to clean up half-provisioned workspace after reset failure; leaving for janitor retry',
+          );
+        }
+      }
+      throw err;
     } finally {
       ws.sessionAbort.A = false;
       ws.sessionAbort.B = false;
@@ -552,15 +573,19 @@ export class WorkspaceManager {
     ws.deleting = true;
     ws.teardownActive = true;
     let acquired: SessionId[] = [];
+    let dropStarted = false;
     let deleted = false;
     try {
       acquired = await this.acquireAllSessionLocksForTeardown(ws, timeoutMs);
-      this.workspaces.delete(wsId);
-      deleted = true;
+      dropStarted = true;
       await this.closeAllSessions(ws);
       await this.dropDbAndUser(ws.database, ws.dbUser);
+      this.workspaces.delete(wsId);
+      deleted = true;
     } finally {
-      if (!deleted) {
+      // Only clear deleting if teardown aborted BEFORE drop started; if dropDbAndUser failed,
+      // keep ws.deleting = true in the map so the janitor retries cleanup [LOGIC-006].
+      if (!deleted && !dropStarted) {
         ws.deleting = false;
       }
       ws.sessionAbort.A = false;
@@ -712,8 +737,14 @@ export class WorkspaceManager {
   }
 
   async cleanupOrphans(): Promise<{ droppedDatabases: number; droppedUsers: number }> {
-    const liveDbs = new Set([...this.workspaces.values()].map((w) => w.database));
-    const liveUsers = new Set([...this.workspaces.values()].map((w) => w.dbUser));
+    const liveDbs = new Set([
+      ...[...this.workspaces.values()].map((w) => w.database),
+      ...this.inFlightDatabases,
+    ]);
+    const liveUsers = new Set([
+      ...[...this.workspaces.values()].map((w) => w.dbUser),
+      ...this.inFlightDatabases,
+    ]);
 
     const [schemas] = await this.adminPool.query<SchemaNameRow[]>(
       "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME LIKE 'ws\\_%'",
@@ -754,6 +785,25 @@ export class WorkspaceManager {
     let expiredWorkspaces = 0;
     let closedIdleSessions = 0;
     let truncatedWorkspaces = 0;
+
+    // 0. Retry previously failed workspace drops left marked ws.deleting [LOGIC-006]
+    for (const [wsId, ws] of [...this.workspaces.entries()]) {
+      if (!ws.deleting || ws.teardownActive) continue;
+      ws.teardownActive = true;
+      try {
+        await this.closeAllSessions(ws);
+        await this.dropDbAndUser(ws.database, ws.dbUser);
+        this.workspaces.delete(wsId);
+        expiredWorkspaces += 1;
+      } catch (err) {
+        this.logger.warn(
+          { err, database: ws.database },
+          'Retrying failed workspace drop in janitor failed; will retry next sweep',
+        );
+      } finally {
+        ws.teardownActive = false;
+      }
+    }
 
     // 1. Workspace idle TTL (2 h) and absolute max TTL (12 h).
     // Idle-expired workspaces wait for active sessions; workspaces past absoluteExpiresAt

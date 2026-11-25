@@ -911,3 +911,98 @@ describe('In-path storage cap and janitor busy-oversized enforcement [LOGIC-003]
     expect(sweep.truncatedWorkspaces).toBe(1);
   });
 });
+
+describe('WorkspaceManager failed drop retry and reset failure cleanup [LOGIC-006, LOGIC-007]', () => {
+  const cfg = loadConfig({
+    SQLSCRATCHPAD_ADMIN_PASSWORD: 'test-password',
+    LOG_LEVEL: 'silent',
+  });
+  const silentLogger = {
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    debug: () => {},
+  } as unknown as FastifyBaseLogger;
+
+  function makeWs(wsId: string, database: string): WorkspaceEntry {
+    const now = Date.now();
+    return {
+      wsId,
+      database,
+      dbUser: database,
+      password: 'original-password',
+      dataset: 'empty',
+      createdAt: now,
+      lastActiveAt: now,
+      expiresAt: now + 60_000,
+      absoluteExpiresAt: now + 60_000,
+      sessions: {},
+      sessionLocks: {},
+      sessionWaiters: {},
+      sessionAbort: {},
+      teardownActive: false,
+      deleting: false,
+    };
+  }
+
+  it('retains entry as deleting when dropDbAndUser fails and cleans it up on next janitor sweep [LOGIC-006]', async () => {
+    let failDrop = true;
+    const fakePool = {
+      query: async () => [[], []],
+      getConnection: async () => ({
+        query: async (sql: string) => {
+          if (failDrop && sql.startsWith('DROP DATABASE')) {
+            throw new Error('transient DB error');
+          }
+          return [[], []];
+        },
+        release: () => {},
+      }),
+    } as unknown as Pool;
+
+    const wm = new WorkspaceManager(fakePool, cfg, [], silentLogger);
+    const ws = makeWs('wsidfaileddrop1', 'ws_faileddrop01');
+    (wm as unknown as { workspaces: Map<string, WorkspaceEntry> }).workspaces.set(ws.wsId, ws);
+
+    await expect(wm.deleteWorkspace(ws.wsId)).rejects.toThrow('transient DB error');
+    // Still tracked (marked deleting) so it is not orphaned, and unreachable via getWorkspace
+    expect(wm.getWorkspaceCount()).toBe(1);
+    expect(ws.deleting).toBe(true);
+    expect(() => wm.getWorkspace(ws.wsId)).toThrowError(ApiError);
+
+    // Next janitor sweep retries dropDbAndUser and removes the entry
+    failDrop = false;
+    const sweep = await wm.runJanitorSweep();
+    expect(sweep.expiredWorkspaces).toBe(1);
+    expect(wm.getWorkspaceCount()).toBe(0);
+  });
+
+  it('evicts workspace and does not mutate password/dataset when resetWorkspace fails after drop [LOGIC-007]', async () => {
+    const fakePool = {
+      query: async () => [[], []],
+      getConnection: async () => ({
+        query: async (sql: string) => {
+          if (sql.startsWith('CREATE DATABASE')) {
+            throw new Error('provision failed');
+          }
+          return [[], []];
+        },
+        release: () => {},
+      }),
+    } as unknown as Pool;
+
+    const wm = new WorkspaceManager(
+      fakePool,
+      cfg,
+      [{ id: 'empty', title: 'Empty', description: 'Empty', tables: [], engines: ['mariadb'] }],
+      silentLogger,
+    );
+    const ws = makeWs('wsidresetfail1', 'ws_resetfail01');
+    (wm as unknown as { workspaces: Map<string, WorkspaceEntry> }).workspaces.set(ws.wsId, ws);
+
+    await expect(wm.resetWorkspace(ws.wsId, 'empty')).rejects.toThrow('provision failed');
+    // Password was never rotated on failure and broken workspace was evicted
+    expect(ws.password).toBe('original-password');
+    expect(wm.getWorkspaceCount()).toBe(0);
+  });
+});

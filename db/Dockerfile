@@ -1,5 +1,5 @@
 # MariaDB 11.4.13-noble multi-arch OCI index (linux/arm64/v8 + linux/amd64)
-FROM mariadb:11.4@sha256:5e73baf8179b29f115101bb102763a47a017361f3e9792daccba6646c3ab1532
+FROM mariadb:11.4@sha256:a8992b5e5404d11e03c54a31d0c1bdea3fd116d283aa6d1a627551f29045309b
 
 RUN mkdir -p /var/lib/mysql-files-disabled && chown root:root /var/lib/mysql-files-disabled && chmod 555 /var/lib/mysql-files-disabled
 

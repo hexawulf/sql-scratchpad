@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import type { Connection, FieldPacket, Pool } from 'mysql2/promise';
 import type { FastifyBaseLogger } from 'fastify';
@@ -13,6 +14,7 @@ import { ApiError } from './errors.js';
 import { buildExecSleepLoopSql } from './fixtures/hostile-corpus.js';
 import {
   ImportByteBudget,
+  ImportEngine,
   buildImportErrorHint,
   classifyImportSkip,
   rewriteDefinerClauses,
@@ -158,9 +160,9 @@ describe('splitMariaDbStatements', () => {
     expect(performance.now() - t0).toBeLessThan(100);
     expect(() => splitMariaDbStatements('DELIMITER a\x00b\nSELECT 1')).toThrowError(ApiError);
     // Delimiter up to 16 chars remains allowed
-    expect(splitMariaDbStatements('DELIMITER 1234567890123456\nSELECT 1 1234567890123456')).toHaveLength(
-      1,
-    );
+    expect(
+      splitMariaDbStatements('DELIMITER 1234567890123456\nSELECT 1 1234567890123456'),
+    ).toHaveLength(1);
   });
 });
 
@@ -227,7 +229,10 @@ describe('stripCommentsAndLiterals & checkDenylist', () => {
     expect(checkDenylist(hostile, 'ws_111111111111')).toBeNull();
     expect(performance.now() - t0).toBeLessThan(200);
     expect(
-      checkDenylist("CREATE OR REPLACE AGGREGATE FUNCTION f RETURNS INT SONAME 'x.so'", 'ws_111111111111'),
+      checkDenylist(
+        "CREATE OR REPLACE AGGREGATE FUNCTION f RETURNS INT SONAME 'x.so'",
+        'ws_111111111111',
+      ),
     ).toContain('SONAME');
   });
 });
@@ -543,5 +548,158 @@ describe('ExecEngine wall-clock timeout, statement cap, and janitor absolute TTL
     expect(killedThreads).toContain(777);
     expect(sweep.expiredWorkspaces).toBe(1);
     expect(wm.getWorkspaceCount()).toBe(0);
+  });
+});
+
+describe('Streaming row caps in ExecEngine and ImportEngine [API-002]', () => {
+  function makeWs(): WorkspaceEntry {
+    const now = Date.now();
+    return {
+      wsId: 'wsidstreaming1',
+      database: 'ws_0123456789ab',
+      dbUser: 'ws_0123456789ab',
+      password: 'pw',
+      dataset: 'empty',
+      createdAt: now,
+      lastActiveAt: now,
+      expiresAt: now + 60_000,
+      absoluteExpiresAt: now + 60_000,
+      sessions: {},
+      sessionLocks: {},
+      sessionWaiters: {},
+      sessionAbort: {},
+      teardownActive: false,
+      deleting: false,
+    };
+  }
+
+  it('streams rows, enforces RESPONSE_CAP_BYTES mid-stream, kills query, and tolerates ER_QUERY_INTERRUPTED', async () => {
+    const ws = makeWs();
+    const cfg = loadConfig({
+      SQLSCRATCHPAD_ADMIN_PASSWORD: 'test-password',
+      LOG_LEVEL: 'silent',
+      ROW_CAP: '100',
+      RESPONSE_CAP_BYTES: '1024',
+    });
+
+    let killCalls = 0;
+    const rawConn = {
+      query: () => {
+        const ee = new EventEmitter();
+        queueMicrotask(() => {
+          ee.emit('fields', [{ name: 'payload', columnType: 253, characterSet: 45 }]);
+          // Emit 50 rows of 300 bytes each; should truncate after 3 rows (< 1024 B) and kill
+          for (let r = 0; r < 50; r += 1) {
+            ee.emit('result', ['X'.repeat(300)]);
+          }
+          const interrupted = Object.assign(new Error('Query execution was interrupted'), {
+            errno: 1317,
+            code: 'ER_QUERY_INTERRUPTED',
+          });
+          ee.emit('error', interrupted);
+          ee.emit('end');
+        });
+        return ee;
+      },
+    };
+    const session: PinnedSession = {
+      id: 'A',
+      conn: {
+        connection: rawConn,
+        query: async (sql: string) => {
+          if (sql.includes('@@in_transaction')) return [[{ in_tx: 0 }], []];
+          return [[], []];
+        },
+        end: async () => {},
+        destroy: () => {},
+      } as unknown as Connection,
+      threadId: 99,
+      busy: true,
+      lastUsedAt: Date.now(),
+    };
+    const fakeWm = {
+      getWorkspace: () => ws,
+      touchWorkspace: () => {},
+      acquireSession: async () => session,
+      releaseSession: () => {},
+      isSessionAbortRequested: () => false,
+      killSessionQuery: async () => {
+        killCalls += 1;
+      },
+    } as unknown as WorkspaceManager;
+
+    const engine = new ExecEngine(fakeWm, cfg);
+    const res = await engine.execute(ws.wsId, {
+      sql: "SELECT REPEAT('X', 300);",
+      session: 'A',
+      stopOnError: true,
+    });
+    expect(killCalls).toBe(1);
+    expect(res.results).toHaveLength(1);
+    expect(res.results[0]?.kind).toBe('rows');
+    expect(res.results[0]?.truncated).toBe(true);
+    expect(res.results[0]?.rowCount).toBeLessThanOrEqual(3);
+  });
+
+  it('streams and discards SELECT rows in ImportEngine and kills oversized result streams', async () => {
+    const ws = makeWs();
+    const cfg = loadConfig({
+      SQLSCRATCHPAD_ADMIN_PASSWORD: 'test-password',
+      LOG_LEVEL: 'silent',
+      RESPONSE_CAP_BYTES: '1024',
+    });
+
+    let killCalls = 0;
+    const rawConn = {
+      query: () => {
+        const ee = new EventEmitter();
+        queueMicrotask(() => {
+          ee.emit('fields', [{ name: 'big', columnType: 253, characterSet: 45 }]);
+          for (let r = 0; r < 10; r += 1) {
+            ee.emit('result', ['Y'.repeat(500)]);
+          }
+          const interrupted = Object.assign(new Error('Query execution was interrupted'), {
+            errno: 1317,
+            code: 'ER_QUERY_INTERRUPTED',
+          });
+          ee.emit('error', interrupted);
+        });
+        return ee;
+      },
+    };
+    const session: PinnedSession = {
+      id: 'A',
+      conn: {
+        connection: rawConn,
+        query: async (sql: string) => {
+          if (sql.includes('@@in_transaction')) return [[{ in_tx: 0, auto_c: 1 }], []];
+          return [[], []];
+        },
+        end: async () => {},
+        destroy: () => {},
+      } as unknown as Connection,
+      threadId: 101,
+      busy: true,
+      lastUsedAt: Date.now(),
+    };
+    const fakeWm = {
+      getWorkspace: () => ws,
+      touchWorkspace: () => {},
+      acquireSession: async () => session,
+      releaseSession: () => {},
+      isSessionAbortRequested: () => false,
+      killSessionQuery: async () => {
+        killCalls += 1;
+      },
+    } as unknown as WorkspaceManager;
+
+    const importer = new ImportEngine(fakeWm, cfg);
+    const res = await importer.importSql(ws.wsId, {
+      sql: "SELECT REPEAT('Y', 500);",
+      mode: 'append',
+    });
+    expect(res.ok).toBe(true);
+    expect(killCalls).toBe(1);
+    expect(res.statementsOk).toBe(1);
   });
 });

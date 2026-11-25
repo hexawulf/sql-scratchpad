@@ -1,3 +1,4 @@
+import type { EventEmitter } from 'node:events';
 import { splitQuery, mysqlSplitterOptions } from 'dbgate-query-splitter';
 
 interface RichSplitItem {
@@ -182,7 +183,10 @@ function validateCustomDelimiters(sql: string): void {
       sql.slice(i, i + 9).toUpperCase() === 'DELIMITER' &&
       (sql[i + 9] === ' ' || sql[i + 9] === '\t')
     ) {
-      const rawToken = sql.slice(i + 10, lineEnd).replace(/\r$/, '').trim();
+      const rawToken = sql
+        .slice(i + 10, lineEnd)
+        .replace(/\r$/, '')
+        .trim();
       if (rawToken.length > MAX_DELIMITER_LENGTH) {
         throw new ApiError(
           400,
@@ -231,8 +235,7 @@ export function splitMariaDbStatements(sql: string): SplitStatement[] {
 }
 
 type DenylistRule =
-  | { pattern: RegExp; message: string }
-  | { test: (cleaned: string) => boolean; message: string };
+  { pattern: RegExp; message: string } | { test: (cleaned: string) => boolean; message: string };
 
 const DENYLIST_RULES: DenylistRule[] = [
   {
@@ -385,6 +388,139 @@ interface WarningRow extends RowDataPacket {
   Message: string;
 }
 
+interface RawCallbackQuery extends EventEmitter {
+  on(event: 'fields', listener: (fields: FieldPacket[] | undefined) => void): this;
+  on(event: 'result', listener: (row: unknown[] | ResultSetHeader) => void): this;
+  on(event: 'error', listener: (err: Error) => void): this;
+  on(event: 'end', listener: () => void): this;
+}
+
+interface RawCallbackConnection {
+  query(options: { sql: string; rowsAsArray: true }): RawCallbackQuery;
+}
+
+function getRawCallbackConnection(
+  conn: import('mysql2/promise').Connection,
+): RawCallbackConnection | null {
+  const raw = (conn as unknown as { connection?: RawCallbackConnection }).connection;
+  return raw && typeof raw.query === 'function' ? raw : null;
+}
+
+interface StreamedQueryResult {
+  kind: 'rows' | 'ok';
+  columns?: ColumnMeta[];
+  rows?: unknown[][];
+  truncated?: boolean;
+  bytesAdded: number;
+  header?: ResultSetHeader;
+  killedOnTruncate: boolean;
+}
+
+function executeStreamingQuery(
+  rawConn: RawCallbackConnection,
+  sql: string,
+  rowCap: number,
+  currentResponseBytes: number,
+  responseCapBytes: number,
+  onKillQuery: () => void,
+): Promise<StreamedQueryResult> {
+  return new Promise<StreamedQueryResult>((resolve, reject) => {
+    const query = rawConn.query({ sql, rowsAsArray: true });
+    let settled = false;
+    let isRowSet = false;
+    let columns: ColumnMeta[] = [];
+    const rows: unknown[][] = [];
+    let truncated = false;
+    let droppedRows = 0;
+    let bytesAdded = 0;
+    let header: ResultSetHeader | undefined;
+    let killRequested = false;
+
+    const triggerKillOnce = (): void => {
+      if (killRequested) return;
+      killRequested = true;
+      onKillQuery();
+    };
+
+    const finishOk = (): void => {
+      if (settled) return;
+      settled = true;
+      if (isRowSet) {
+        resolve({
+          kind: 'rows',
+          columns,
+          rows,
+          truncated,
+          bytesAdded,
+          killedOnTruncate: killRequested,
+        });
+      } else {
+        resolve({
+          kind: 'ok',
+          header: header ?? ({ affectedRows: 0, warningStatus: 0 } as ResultSetHeader),
+          bytesAdded: 0,
+          killedOnTruncate: false,
+        });
+      }
+    };
+
+    query.on('fields', (fields) => {
+      if (Array.isArray(fields)) {
+        isRowSet = true;
+        columns = fields.map((f) => ({
+          name: f.name,
+          type: formatColumnType(f),
+        }));
+      }
+    });
+
+    query.on('result', (rowOrHeader) => {
+      if (!isRowSet) {
+        header = rowOrHeader as ResultSetHeader;
+        return;
+      }
+      if (truncated) {
+        droppedRows += 1;
+        if (droppedRows >= 8) {
+          triggerKillOnce();
+        }
+        return;
+      }
+      if (rows.length >= rowCap) {
+        truncated = true;
+        droppedRows += 1;
+        return;
+      }
+      const normalized = (rowOrHeader as unknown[]).map(normalizeCellValue);
+      const rowBytes = Buffer.byteLength(JSON.stringify(normalized), 'utf8');
+      if (currentResponseBytes + bytesAdded + rowBytes > responseCapBytes) {
+        truncated = true;
+        triggerKillOnce();
+        return;
+      }
+      bytesAdded += rowBytes;
+      rows.push(normalized);
+    });
+
+    query.on('error', (err) => {
+      if (settled) return;
+      const mysqlErr = err as { errno?: number };
+      // If we triggered KILL QUERY because the response cap was exceeded,
+      // ER_QUERY_INTERRUPTED (1317) is the expected termination of the truncated stream.
+      if (killRequested && truncated && mysqlErr.errno === 1317) {
+        finishOk();
+        return;
+      }
+      settled = true;
+      reject(err);
+    });
+
+    query.on('end', () => {
+      finishOk();
+    });
+  });
+}
+
 export class ExecEngine {
   constructor(
     private readonly workspaceManager: WorkspaceManager,
@@ -473,70 +609,130 @@ export class ExecEngine {
             await session.conn.query(`SET SESSION max_statement_time = ${cappedSec}`);
             maxStmtTimeLowered = true;
           }
-          const [raw, fields] = await session.conn.query({
-            sql: stmt.sql,
-            rowsAsArray: true,
-          });
-          const durationMs = Math.round((Number(process.hrtime.bigint() - t0) / 1e6) * 1000) / 1000;
+          const rawConn = getRawCallbackConnection(session.conn);
+          if (rawConn) {
+            const streamed = await executeStreamingQuery(
+              rawConn,
+              stmt.sql,
+              this.config.ROW_CAP,
+              responseBytes,
+              this.config.RESPONSE_CAP_BYTES,
+              () => {
+                void this.workspaceManager.killSessionQuery(ws.wsId, req.session).catch(() => {});
+              },
+            );
+            const durationMs =
+              Math.round((Number(process.hrtime.bigint() - t0) / 1e6) * 1000) / 1000;
 
-          if (Array.isArray(raw)) {
-            const columns: ColumnMeta[] = (fields ?? []).map((f) => ({
-              name: f.name,
-              type: formatColumnType(f),
-            }));
-
-            const totalRows = raw.length;
-            let truncated = totalRows > this.config.ROW_CAP;
-            const limit = Math.min(totalRows, this.config.ROW_CAP);
-            const rows: unknown[][] = [];
-
-            for (let r = 0; r < limit; r += 1) {
-              const row = (raw[r] as unknown[]).map(normalizeCellValue);
-              const rowBytes = Buffer.byteLength(JSON.stringify(row), 'utf8');
-              if (responseBytes + rowBytes > this.config.RESPONSE_CAP_BYTES) {
-                truncated = true;
-                break;
-              }
-              responseBytes += rowBytes;
-              rows.push(row);
-            }
-
-            const warnings = await this.fetchWarnings(session.conn);
-            const stmtRes: StatementResult = {
-              index: i,
-              sql: stmt.sql,
-              startLine: stmt.startLine,
-              kind: 'rows',
-              columns,
-              rows,
-              rowCount: rows.length,
-              truncated,
-              durationMs,
-            };
-            if (warnings.length > 0) {
-              stmtRes.warnings = warnings;
-            }
-            results.push(stmtRes);
-          } else {
-            const header = raw as ResultSetHeader;
-            const stmtRes: StatementResult = {
-              index: i,
-              sql: stmt.sql,
-              startLine: stmt.startLine,
-              kind: 'ok',
-              affectedRows: header.affectedRows,
-              durationMs,
-            };
-            if (header.insertId !== undefined && header.insertId !== 0) {
-              stmtRes.insertId = header.insertId;
-            }
-            if (header.warningStatus > 0) {
-              const warnings = await this.fetchWarnings(session.conn);
+            if (streamed.kind === 'rows') {
+              responseBytes += streamed.bytesAdded;
+              const rows = streamed.rows ?? [];
+              const warnings = streamed.killedOnTruncate
+                ? []
+                : await this.fetchWarnings(session.conn);
+              const stmtRes: StatementResult = {
+                index: i,
+                sql: stmt.sql,
+                startLine: stmt.startLine,
+                kind: 'rows',
+                columns: streamed.columns ?? [],
+                rows,
+                rowCount: rows.length,
+                truncated: Boolean(streamed.truncated),
+                durationMs,
+              };
               if (warnings.length > 0) {
                 stmtRes.warnings = warnings;
               }
+              results.push(stmtRes);
+            } else {
+              const header = streamed.header!;
+              const stmtRes: StatementResult = {
+                index: i,
+                sql: stmt.sql,
+                startLine: stmt.startLine,
+                kind: 'ok',
+                affectedRows: header.affectedRows,
+                durationMs,
+              };
+              if (header.insertId !== undefined && header.insertId !== 0) {
+                stmtRes.insertId = header.insertId;
+              }
+              if (header.warningStatus > 0) {
+                const warnings = await this.fetchWarnings(session.conn);
+                if (warnings.length > 0) {
+                  stmtRes.warnings = warnings;
+                }
+              }
+              results.push(stmtRes);
             }
-            results.push(stmtRes);
+          } else {
+            const [raw, fields] = await session.conn.query({
+              sql: stmt.sql,
+              rowsAsArray: true,
+            });
+            const durationMs =
+              Math.round((Number(process.hrtime.bigint() - t0) / 1e6) * 1000) / 1000;
+
+            if (Array.isArray(raw)) {
+              const columns: ColumnMeta[] = (fields ?? []).map((f) => ({
+                name: f.name,
+                type: formatColumnType(f),
+              }));
+
+              const totalRows = raw.length;
+              let truncated = totalRows > this.config.ROW_CAP;
+              const limit = Math.min(totalRows, this.config.ROW_CAP);
+              const rows: unknown[][] = [];
+
+              for (let r = 0; r < limit; r += 1) {
+                const row = (raw[r] as unknown[]).map(normalizeCellValue);
+                const rowBytes = Buffer.byteLength(JSON.stringify(row), 'utf8');
+                if (responseBytes + rowBytes > this.config.RESPONSE_CAP_BYTES) {
+                  truncated = true;
+                  break;
+                }
+                responseBytes += rowBytes;
+                rows.push(row);
+              }
+
+              const warnings = await this.fetchWarnings(session.conn);
+              const stmtRes: StatementResult = {
+                index: i,
+                sql: stmt.sql,
+                startLine: stmt.startLine,
+                kind: 'rows',
+                columns,
+                rows,
+                rowCount: rows.length,
+                truncated,
+                durationMs,
+              };
+              if (warnings.length > 0) {
+                stmtRes.warnings = warnings;
+              }
+              results.push(stmtRes);
+            } else {
+              const header = raw as ResultSetHeader;
+              const stmtRes: StatementResult = {
+                index: i,
+                sql: stmt.sql,
+                startLine: stmt.startLine,
+                kind: 'ok',
+                affectedRows: header.affectedRows,
+                durationMs,
+              };
+              if (header.insertId !== undefined && header.insertId !== 0) {
+                stmtRes.insertId = header.insertId;
+              }
+              if (header.warningStatus > 0) {
+                const warnings = await this.fetchWarnings(session.conn);
+                if (warnings.length > 0) {
+                  stmtRes.warnings = warnings;
+                }
+              }
+              results.push(stmtRes);
+            }
           }
         } catch (err) {
           const durationMs = Math.round((Number(process.hrtime.bigint() - t0) / 1e6) * 1000) / 1000;

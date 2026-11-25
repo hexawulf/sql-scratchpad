@@ -1,4 +1,5 @@
-import type { Connection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import type { EventEmitter } from 'node:events';
+import type { Connection, FieldPacket, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import type {
   ImportErrorDetail,
   ImportRequest,
@@ -93,7 +94,12 @@ function stripLeadingComments(sql: string): string {
       while (i < n && sql[i] !== '\n') i += 1;
       continue;
     }
-    if (ch === '/' && next === '*' && sql[i + 2] !== '!' && !(sql[i + 2] === 'M' && sql[i + 3] === '!')) {
+    if (
+      ch === '/' &&
+      next === '*' &&
+      sql[i + 2] !== '!' &&
+      !(sql[i + 2] === 'M' && sql[i + 3] === '!')
+    ) {
       i += 2;
       while (i < n && !(sql[i] === '*' && i + 1 < n && sql[i + 1] === '/')) {
         i += 1;
@@ -362,6 +368,93 @@ interface SessionTxStateRow extends RowDataPacket {
   auto_c: number | string;
 }
 
+interface RawImportQuery extends EventEmitter {
+  on(event: 'fields', listener: (fields: FieldPacket[] | undefined) => void): this;
+  on(event: 'result', listener: (row: unknown[] | ResultSetHeader) => void): this;
+  on(event: 'error', listener: (err: Error) => void): this;
+  on(event: 'end', listener: () => void): this;
+}
+
+interface RawImportConnection {
+  query(options: { sql: string; rowsAsArray: true }): RawImportQuery;
+}
+
+function estimateRowBytes(row: unknown[]): number {
+  let total = 16;
+  for (const cell of row) {
+    if (typeof cell === 'string') total += cell.length;
+    else if (Buffer.isBuffer(cell)) total += cell.length;
+    else if (cell !== null && cell !== undefined) total += 8;
+  }
+  return total;
+}
+
+function executeImportStatementStreaming(
+  conn: Connection,
+  sql: string,
+  maxDiscardedBytes: number,
+  onOverflowKill: () => void,
+): Promise<{ warningStatus: number }> {
+  const rawConn = (conn as unknown as { connection?: RawImportConnection }).connection;
+  if (!rawConn || typeof rawConn.query !== 'function') {
+    return conn.query({ sql, rowsAsArray: true }).then(([raw]) => {
+      if (!Array.isArray(raw)) {
+        return { warningStatus: Number((raw as ResultSetHeader).warningStatus ?? 0) };
+      }
+      return { warningStatus: 0 };
+    });
+  }
+
+  return new Promise<{ warningStatus: number }>((resolve, reject) => {
+    const query = rawConn.query({ sql, rowsAsArray: true });
+    let settled = false;
+    let isRowSet = false;
+    let warningStatus = 0;
+    let discardedBytes = 0;
+    let killRequested = false;
+
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      resolve({ warningStatus });
+    };
+
+    query.on('fields', (fields) => {
+      if (Array.isArray(fields)) {
+        isRowSet = true;
+      }
+    });
+
+    query.on('result', (rowOrHeader) => {
+      if (!isRowSet) {
+        warningStatus = Number((rowOrHeader as ResultSetHeader).warningStatus ?? 0);
+        return;
+      }
+      // Stream and discard result rows immediately so /import never buffers result sets in heap
+      discardedBytes += estimateRowBytes(rowOrHeader as unknown[]);
+      if (!killRequested && discardedBytes > maxDiscardedBytes) {
+        killRequested = true;
+        onOverflowKill();
+      }
+    });
+
+    query.on('error', (err) => {
+      if (settled) return;
+      const mysqlErr = err as { errno?: number };
+      if (killRequested && mysqlErr.errno === 1317) {
+        finish();
+        return;
+      }
+      settled = true;
+      reject(err);
+    });
+
+    query.on('end', () => {
+      finish();
+    });
+  });
+}
+
 async function listWorkspaceTables(conn: Connection): Promise<string[]> {
   const [rows] = await conn.query<TableNameRow[]>(
     `SELECT TABLE_NAME
@@ -525,14 +618,15 @@ export class ImportEngine {
 
         statementsRun += 1;
         try {
-          const [raw] = await session.conn.query({
-            sql: execSql,
-            rowsAsArray: true,
-          });
-          if (!Array.isArray(raw)) {
-            const header = raw as ResultSetHeader;
-            warningsCount += Number(header.warningStatus ?? 0);
-          }
+          const res = await executeImportStatementStreaming(
+            session.conn,
+            execSql,
+            this.config.RESPONSE_CAP_BYTES,
+            () => {
+              void this.workspaceManager.killSessionQuery(ws.wsId, 'A').catch(() => {});
+            },
+          );
+          warningsCount += res.warningStatus;
           statementsOk += 1;
 
           if (batchedAutocommit) {

@@ -617,6 +617,7 @@ export class WorkspaceManager {
     });
 
     await conn.query('SET SESSION max_statement_time = 5');
+    await conn.query(`SET SESSION sql_select_limit = ${this.config.ROW_CAP + 1}`);
     const threadId = conn.threadId;
     if (typeof threadId !== 'number') {
       await conn.end().catch(() => {});

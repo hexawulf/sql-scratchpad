@@ -35,7 +35,12 @@ function stripLeadingCommentsAndWhitespace(sql: string): { text: string; leading
       i = nl === -1 ? n : nl + 1;
       continue;
     }
-    if (ch === '/' && sql[i + 1] === '*' && sql[i + 2] !== '!' && !(sql[i + 2] === 'M' && sql[i + 3] === '!')) {
+    if (
+      ch === '/' &&
+      sql[i + 1] === '*' &&
+      sql[i + 2] !== '!' &&
+      !(sql[i + 2] === 'M' && sql[i + 3] === '!')
+    ) {
       const end = sql.indexOf('*/', i + 2);
       i = end === -1 ? n : end + 2;
       continue;
@@ -199,6 +204,12 @@ function stripAllCommentsAndLiterals(sql: string): string {
         out += ' ';
         continue;
       }
+      if (i + 3 < n && sql[i + 2] === 'M' && sql[i + 3] === '!') {
+        i += 4;
+        while (i < n && /[0-9]/.test(sql[i]!)) i += 1;
+        out += ' ';
+        continue;
+      }
       i += 2;
       while (i < n && !(sql[i] === '*' && i + 1 < n && sql[i + 1] === '/')) {
         i += 1;
@@ -209,6 +220,22 @@ function stripAllCommentsAndLiterals(sql: string): string {
     }
     if (ch === '*' && next === '/') {
       i += 2;
+      out += ' ';
+      continue;
+    }
+    if (ch === '`') {
+      i += 1;
+      while (i < n) {
+        if (sql[i] === '`') {
+          if (i + 1 < n && sql[i + 1] === '`') {
+            i += 2;
+            continue;
+          }
+          i += 1;
+          break;
+        }
+        i += 1;
+      }
       out += ' ';
       continue;
     }

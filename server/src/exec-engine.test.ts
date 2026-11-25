@@ -235,6 +235,23 @@ describe('stripCommentsAndLiterals & checkDenylist', () => {
       ),
     ).toContain('SONAME');
   });
+
+  it('blocks denylist bypasses via backticks, /*M!*/ comments, dynamic SQL, and NO_BACKSLASH_ESCAPES [INJECTION-004]', () => {
+    const db = 'ws_111111111111';
+    // Backtick identifier containing quote or comment start
+    expect(checkDenylist("SELECT `a'`, BENCHMARK(100, 1), `'b`", db)).not.toBeNull();
+    expect(checkDenylist('SELECT `x/*`, BENCHMARK(100, 1), `*/y`', db)).not.toBeNull();
+    // MariaDB /*M! ... */ executable comment
+    expect(checkDenylist('SELECT /*M!100000 BENCHMARK(100, 1) */', db)).not.toBeNull();
+    // Dynamic SQL PREPARE / EXECUTE IMMEDIATE
+    expect(checkDenylist("PREPARE s FROM 'SELECT BENCHMARK(100, 1)'", db)).not.toBeNull();
+    expect(checkDenylist("EXECUTE IMMEDIATE 'SELECT BENCHMARK(100, 1)'", db)).not.toBeNull();
+    // NO_BACKSLASH_ESCAPES trailing backslash
+    expect(checkDenylist("SELECT '\\', BENCHMARK(100, 1), ''", db)).not.toBeNull();
+    // @@PERSIST. / @@PERSIST_ONLY.
+    expect(checkDenylist('SET @@PERSIST.max_connections = 999', db)).not.toBeNull();
+    expect(checkDenylist('SET @@PERSIST_ONLY.max_connections = 999', db)).not.toBeNull();
+  });
 });
 
 describe('import helpers: classifyImportSkip, rewriteDefinerClauses, ImportByteBudget', () => {

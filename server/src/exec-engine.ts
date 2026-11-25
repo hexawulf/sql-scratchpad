@@ -25,7 +25,7 @@ export interface SplitStatement {
 /**
  * Strip SQL comments and string literals (replacing them with spaces) for safe denylist inspection.
  */
-export function stripCommentsAndLiterals(sql: string): string {
+export function stripCommentsAndLiterals(sql: string, backslashEscapes = true): string {
   let out = '';
   let i = 0;
   const n = sql.length;
@@ -50,11 +50,18 @@ export function stripCommentsAndLiterals(sql: string): string {
       continue;
     }
 
-    // Block comment /* ... */ (keep executable /*! ... */ content inspectable)
+    // Block comment /* ... */ (keep executable /*! ... */ and MariaDB /*M! ... */ inspectable)
     if (ch === '/' && next === '*') {
       if (i + 2 < n && sql[i + 2] === '!') {
-        // MariaDB conditional comment: inspect inner tokens
+        // Conditional comment: inspect inner tokens
         i += 3;
+        while (i < n && /[0-9]/.test(sql[i]!)) i += 1;
+        out += ' ';
+        continue;
+      }
+      if (i + 3 < n && sql[i + 2] === 'M' && sql[i + 3] === '!') {
+        // MariaDB-specific executable comment /*M!NNNNN ... */: inspect inner tokens
+        i += 4;
         while (i < n && /[0-9]/.test(sql[i]!)) i += 1;
         out += ' ';
         continue;
@@ -75,12 +82,33 @@ export function stripCommentsAndLiterals(sql: string): string {
       continue;
     }
 
+    // Backtick-quoted identifier (`` doubles literal backtick; backslash is NOT an escape)
+    if (ch === '`') {
+      const start = i + 1;
+      i += 1;
+      while (i < n) {
+        if (sql[i] === '`') {
+          if (i + 1 < n && sql[i + 1] === '`') {
+            i += 2;
+            continue;
+          }
+          break;
+        }
+        i += 1;
+      }
+      const inner = sql.slice(start, i);
+      if (i < n && sql[i] === '`') i += 1;
+      // Preserve simple alphanumeric identifiers (needed for `USE \`db\`` check); neutralize complex ones
+      out += /^[A-Za-z0-9_$-]+$/.test(inner) ? `\`${inner}\`` : ' ';
+      continue;
+    }
+
     // Single-quoted or double-quoted string literal
     if (ch === "'" || ch === '"') {
       const quote = ch;
       i += 1;
       while (i < n) {
-        if (sql[i] === '\\' && i + 1 < n) {
+        if (backslashEscapes && sql[i] === '\\' && i + 1 < n) {
           i += 2;
           continue;
         }
@@ -138,7 +166,12 @@ function stripLeadingNonConditionalComments(sql: string): {
       while (i < n && sql[i] !== '\n') i += 1;
       continue;
     }
-    if (ch === '/' && next === '*' && sql[i + 2] !== '!') {
+    if (
+      ch === '/' &&
+      next === '*' &&
+      sql[i + 2] !== '!' &&
+      !(sql[i + 2] === 'M' && sql[i + 3] === '!')
+    ) {
       i += 2;
       while (i < n && !(sql[i] === '*' && i + 1 < n && sql[i + 1] === '/')) {
         if (sql[i] === '\n') skippedNewlines += 1;
@@ -253,7 +286,7 @@ const DENYLIST_RULES: DenylistRule[] = [
     message: 'Not available in the playground: user management statements are disabled.',
   },
   {
-    pattern: /\bSET\s+(?:GLOBAL|PERSIST|PERSIST_ONLY)\b|@@GLOBAL\./i,
+    pattern: /\bSET\s+(?:GLOBAL|PERSIST|PERSIST_ONLY)\b|@@(?:GLOBAL|PERSIST|PERSIST_ONLY)\./i,
     message:
       'Not available in the playground: modifying global server variables is disabled. Use SET SESSION instead.',
   },
@@ -288,11 +321,14 @@ const DENYLIST_RULES: DenylistRule[] = [
     pattern: /\bBENCHMARK\s*\(/i,
     message: 'Not available in the playground: BENCHMARK() is disabled.',
   },
+  {
+    pattern: /\b(?:PREPARE\s+\S+\s+FROM|EXECUTE\s+IMMEDIATE)\b/i,
+    message:
+      'Not available in the playground: dynamic SQL (PREPARE / EXECUTE IMMEDIATE) is disabled.',
+  },
 ];
 
-export function checkDenylist(sql: string, workspaceDb: string): string | null {
-  const cleaned = stripCommentsAndLiterals(sql);
-
+function checkCleanedDenylist(cleaned: string, workspaceDb: string): string | null {
   for (const rule of DENYLIST_RULES) {
     const matched = 'pattern' in rule ? rule.pattern.test(cleaned) : rule.test(cleaned);
     if (matched) {
@@ -307,6 +343,19 @@ export function checkDenylist(sql: string, workspaceDb: string): string | null {
     if (rawTarget.toLowerCase() !== workspaceDb.toLowerCase()) {
       return `Not available in the playground: USE ${rawTarget} is blocked (workspaces are isolated to ${workspaceDb}).`;
     }
+  }
+
+  return null;
+}
+
+export function checkDenylist(sql: string, workspaceDb: string): string | null {
+  const defaultHit = checkCleanedDenylist(stripCommentsAndLiterals(sql, true), workspaceDb);
+  if (defaultHit) return defaultHit;
+
+  // Also inspect under NO_BACKSLASH_ESCAPES semantics when backslashes are present
+  if (sql.includes('\\')) {
+    const noBsHit = checkCleanedDenylist(stripCommentsAndLiterals(sql, false), workspaceDb);
+    if (noBsHit) return noBsHit;
   }
 
   return null;

@@ -252,6 +252,28 @@ describe('stripCommentsAndLiterals & checkDenylist', () => {
     expect(checkDenylist('SET @@PERSIST.max_connections = 999', db)).not.toBeNull();
     expect(checkDenylist('SET @@PERSIST_ONLY.max_connections = 999', db)).not.toBeNull();
   });
+
+  it('blocks advisory locks, global metadata queries, and DATA/INDEX DIRECTORY [AUTHZ-004, AUTHZ-006]', () => {
+    const db = 'ws_111111111111';
+    for (const sql of [
+      "SELECT GET_LOCK('shared', 1)",
+      "SELECT RELEASE_LOCK('shared')",
+      'SELECT RELEASE_ALL_LOCKS()',
+      "SELECT IS_FREE_LOCK('shared')",
+      "SELECT IS_USED_LOCK('shared')",
+      'SHOW GLOBAL STATUS',
+      'SHOW GLOBAL VARIABLES',
+      'SELECT * FROM information_schema.GLOBAL_STATUS',
+      'SELECT * FROM information_schema.GLOBAL_VARIABLES',
+      'SELECT * FROM information_schema.PLUGINS',
+      "CREATE TABLE t (id INT) DATA DIRECTORY = '/tmp'",
+      "CREATE TABLE t (id INT) INDEX DIRECTORY = '/tmp'",
+    ]) {
+      expect(checkDenylist(sql, db), sql).not.toBeNull();
+    }
+    // Session-scoped metadata remains allowed
+    expect(checkDenylist('SHOW SESSION VARIABLES', db)).toBeNull();
+  });
 });
 
 describe('import helpers: classifyImportSkip, rewriteDefinerClauses, ImportByteBudget', () => {

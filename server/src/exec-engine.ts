@@ -326,6 +326,25 @@ const DENYLIST_RULES: DenylistRule[] = [
     message:
       'Not available in the playground: dynamic SQL (PREPARE / EXECUTE IMMEDIATE) is disabled.',
   },
+  {
+    pattern: /\b(?:GET_LOCK|RELEASE_LOCK|RELEASE_ALL_LOCKS|IS_FREE_LOCK|IS_USED_LOCK)\s*\(/i,
+    message: 'Not available in the playground: server-global advisory lock functions are disabled.',
+  },
+  {
+    pattern: /\bSHOW\s+GLOBAL\s+(?:STATUS|VARIABLES)\b/i,
+    message:
+      'Not available in the playground: SHOW GLOBAL STATUS/VARIABLES is disabled. Use SHOW SESSION instead.',
+  },
+  {
+    pattern:
+      /\binformation_schema\s*\.\s*(?:GLOBAL_STATUS|GLOBAL_VARIABLES|PLUGINS|ALL_PLUGINS)\b/i,
+    message:
+      'Not available in the playground: global server metadata tables in information_schema are disabled.',
+  },
+  {
+    pattern: /\b(?:DATA|INDEX)\s+DIRECTORY\b/i,
+    message: 'Not available in the playground: DATA DIRECTORY / INDEX DIRECTORY is disabled.',
+  },
 ];
 
 function checkCleanedDenylist(cleaned: string, workspaceDb: string): string | null {

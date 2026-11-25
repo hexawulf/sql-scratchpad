@@ -130,3 +130,7 @@ export function build5MbStringLiteralSql(): string {
   const payload = 'A'.repeat(5 * 1024 * 1024);
   return `SELECT LENGTH('${payload}') AS len;`;
 }
+
+export function buildExecSleepLoopSql(count = 100): string {
+  return 'SELECT SLEEP(4);\n'.repeat(count);
+}

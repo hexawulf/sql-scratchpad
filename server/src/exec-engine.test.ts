@@ -1,18 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import type { FieldPacket } from 'mysql2/promise';
+import type { Connection, FieldPacket, Pool } from 'mysql2/promise';
+import type { FastifyBaseLogger } from 'fastify';
 import {
+  ExecEngine,
   checkDenylist,
   formatColumnType,
   splitMariaDbStatements,
   stripCommentsAndLiterals,
 } from './exec-engine.js';
+import { loadConfig } from './config.js';
+import { ApiError } from './errors.js';
+import { buildExecSleepLoopSql } from './fixtures/hostile-corpus.js';
 import {
   ImportByteBudget,
   buildImportErrorHint,
   classifyImportSkip,
   rewriteDefinerClauses,
 } from './import-engine.js';
-import { topoSortTables, escapeGrantDbIdent, templateDbName } from './workspace-manager.js';
+import {
+  WorkspaceManager,
+  topoSortTables,
+  escapeGrantDbIdent,
+  templateDbName,
+  type PinnedSession,
+  type WorkspaceEntry,
+} from './workspace-manager.js';
 import { PINO_REDACT_PATHS, sqlLogMeta } from './logger.js';
 
 describe('splitMariaDbStatements', () => {
@@ -338,5 +350,160 @@ describe('topoSortTables & helpers', () => {
     expect(PINO_REDACT_PATHS).toContain('sql');
     expect(PINO_REDACT_PATHS).toContain('req.body.sql');
     expect(PINO_REDACT_PATHS).toContain('password');
+  });
+});
+
+describe('ExecEngine wall-clock timeout, statement cap, and janitor absolute TTL [API-001]', () => {
+  const baseConfig = loadConfig({
+    SQLSCRATCHPAD_ADMIN_PASSWORD: 'test-password',
+    LOG_LEVEL: 'silent',
+    EXEC_TIMEOUT_MS: '60',
+    EXEC_MAX_STATEMENTS: '5',
+  });
+
+  function makeMockWorkspaceEntry(): WorkspaceEntry {
+    const now = Date.now();
+    return {
+      wsId: 'wsid12345678',
+      database: 'ws_0123456789ab',
+      dbUser: 'ws_0123456789ab',
+      password: 'pw',
+      dataset: 'empty',
+      createdAt: now,
+      lastActiveAt: now,
+      expiresAt: now + 60_000,
+      absoluteExpiresAt: now + 60_000,
+      sessions: {},
+      sessionLocks: {},
+      sessionWaiters: {},
+      sessionAbort: {},
+      teardownActive: false,
+      deleting: false,
+    };
+  }
+
+  it('rejects /exec batches exceeding EXEC_MAX_STATEMENTS', async () => {
+    const ws = makeMockWorkspaceEntry();
+    const session: PinnedSession = {
+      id: 'A',
+      conn: {
+        query: async () => [[], []],
+        end: async () => {},
+        destroy: () => {},
+      } as unknown as Connection,
+      threadId: 42,
+      busy: true,
+      lastUsedAt: Date.now(),
+    };
+    const fakeWm = {
+      getWorkspace: () => ws,
+      touchWorkspace: () => {},
+      acquireSession: async () => session,
+      releaseSession: () => {},
+      isSessionAbortRequested: () => false,
+    } as unknown as WorkspaceManager;
+
+    const engine = new ExecEngine(fakeWm, baseConfig);
+    await expect(
+      engine.execute(ws.wsId, {
+        sql: 'SELECT 1; SELECT 2; SELECT 3; SELECT 4; SELECT 5; SELECT 6;',
+        session: 'A',
+        stopOnError: true,
+      }),
+    ).rejects.toMatchObject({ statusCode: 400, code: 'TOO_MANY_STATEMENTS' } as Partial<ApiError>);
+  });
+
+  it('stops batch execution with EXEC_TIMEOUT once wall-clock budget is exhausted', async () => {
+    const ws = makeMockWorkspaceEntry();
+    const cfg = loadConfig({
+      SQLSCRATCHPAD_ADMIN_PASSWORD: 'test-password',
+      LOG_LEVEL: 'silent',
+      EXEC_TIMEOUT_MS: '50',
+      EXEC_MAX_STATEMENTS: '200',
+    });
+    let executedUserQueries = 0;
+    const session: PinnedSession = {
+      id: 'A',
+      conn: {
+        query: async (arg: string | { sql: string }) => {
+          const sql = typeof arg === 'string' ? arg : arg.sql;
+          if (sql.startsWith('SET SESSION') || sql === 'SHOW WARNINGS') return [[], []];
+          if (sql.includes('@@in_transaction')) return [[{ in_tx: 0 }], []];
+          executedUserQueries += 1;
+          await new Promise((r) => setTimeout(r, 30));
+          return [[[1]], [{ name: 'c', columnType: 3, characterSet: 63 }]];
+        },
+        end: async () => {},
+        destroy: () => {},
+      } as unknown as Connection,
+      threadId: 42,
+      busy: true,
+      lastUsedAt: Date.now(),
+    };
+    const fakeWm = {
+      getWorkspace: () => ws,
+      touchWorkspace: () => {},
+      acquireSession: async () => session,
+      releaseSession: () => {},
+      isSessionAbortRequested: () => false,
+    } as unknown as WorkspaceManager;
+
+    const engine = new ExecEngine(fakeWm, cfg);
+    const res = await engine.execute(ws.wsId, {
+      sql: buildExecSleepLoopSql(20),
+      session: 'A',
+      stopOnError: false,
+    });
+    expect(executedUserQueries).toBeLessThan(20);
+    const last = res.results[res.results.length - 1];
+    expect(last?.kind).toBe('error');
+    expect(last?.error?.code).toBe('EXEC_TIMEOUT');
+  });
+
+  it('forces janitor teardown on busy workspaces past absoluteExpiresAt instead of skipping', async () => {
+    const killedThreads: number[] = [];
+    const fakeConn = {
+      query: async () => [[], []],
+      release: () => {},
+    };
+    const fakePool = {
+      query: async (sql: string) => {
+        const m = /^KILL QUERY (\d+)$/.exec(sql);
+        if (m) {
+          killedThreads.push(Number(m[1]));
+          // Simulate query abort releasing session lock
+          ws.sessionLocks.A = false;
+          if (ws.sessions.A) ws.sessions.A.busy = false;
+          wm.releaseSession(ws, 'A', ws.sessions.A);
+        }
+        return [[], []];
+      },
+      getConnection: async () => fakeConn,
+    } as unknown as Pool;
+    const silentLogger = {
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      debug: () => {},
+    } as unknown as FastifyBaseLogger;
+
+    const wm = new WorkspaceManager(fakePool, baseConfig, [], silentLogger);
+    const ws = makeMockWorkspaceEntry();
+    ws.expiresAt = Date.now() - 10_000;
+    ws.absoluteExpiresAt = Date.now() - 1_000;
+    ws.sessionLocks.A = true;
+    ws.sessions.A = {
+      id: 'A',
+      conn: { end: async () => {}, destroy: () => {} } as unknown as Connection,
+      threadId: 777,
+      busy: true,
+      lastUsedAt: Date.now(),
+    };
+    (wm as unknown as { workspaces: Map<string, WorkspaceEntry> }).workspaces.set(ws.wsId, ws);
+
+    const sweep = await wm.runJanitorSweep();
+    expect(killedThreads).toContain(777);
+    expect(sweep.expiredWorkspaces).toBe(1);
+    expect(wm.getWorkspaceCount()).toBe(0);
   });
 });

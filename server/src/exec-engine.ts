@@ -13,6 +13,7 @@ import type {
   StatementWarning,
 } from '@sql-scratchpad/shared';
 import type { AppConfig } from './config.js';
+import { ApiError } from './errors.js';
 import type { WorkspaceManager } from './workspace-manager.js';
 
 export interface SplitStatement {
@@ -336,11 +337,21 @@ export class ExecEngine {
 
     const session = await this.workspaceManager.acquireSession(ws, req.session);
     let connectionBroken = false;
+    let maxStmtTimeLowered = false;
     const results: StatementResult[] = [];
     let responseBytes = 0;
 
     try {
       const statements = splitMariaDbStatements(req.sql);
+      if (statements.length > this.config.EXEC_MAX_STATEMENTS) {
+        throw new ApiError(
+          400,
+          'TOO_MANY_STATEMENTS',
+          `Batch contains ${statements.length} statements, exceeding the limit of ${this.config.EXEC_MAX_STATEMENTS}.`,
+        );
+      }
+
+      const deadlineMs = Date.now() + this.config.EXEC_TIMEOUT_MS;
 
       for (let i = 0; i < statements.length; i += 1) {
         const stmt = statements[i]!;
@@ -356,6 +367,22 @@ export class ExecEngine {
               code: 'ER_QUERY_INTERRUPTED',
               errno: 1317,
               message: 'Query execution was interrupted',
+            },
+            durationMs: 0,
+          });
+          break;
+        }
+
+        const remainingMs = deadlineMs - Date.now();
+        if (remainingMs <= 0) {
+          results.push({
+            index: i,
+            sql: stmt.sql,
+            startLine: stmt.startLine,
+            kind: 'error',
+            error: {
+              code: 'EXEC_TIMEOUT',
+              message: `Execution exceeded wall-clock limit of ${Math.round(this.config.EXEC_TIMEOUT_MS / 1000)} s`,
             },
             durationMs: 0,
           });
@@ -380,6 +407,12 @@ export class ExecEngine {
         }
 
         try {
+          const remainingSec = remainingMs / 1000;
+          if (remainingSec < 5) {
+            const cappedSec = Math.max(0.1, Number(remainingSec.toFixed(3)));
+            await session.conn.query(`SET SESSION max_statement_time = ${cappedSec}`);
+            maxStmtTimeLowered = true;
+          }
           const [raw, fields] = await session.conn.query({
             sql: stmt.sql,
             rowsAsArray: true,
@@ -494,6 +527,17 @@ export class ExecEngine {
 
       return { results, txOpen };
     } finally {
+      if (
+        maxStmtTimeLowered &&
+        !connectionBroken &&
+        !this.workspaceManager.isSessionAbortRequested(ws, req.session)
+      ) {
+        try {
+          await session.conn.query('SET SESSION max_statement_time = 5');
+        } catch {
+          connectionBroken = true;
+        }
+      }
       this.workspaceManager.releaseSession(ws, req.session, session);
       if (connectionBroken) {
         if (ws.sessions[req.session] === session) {

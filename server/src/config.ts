@@ -126,6 +126,12 @@ const EnvSchema = z.object({
     .int()
     .positive()
     .default(5 * 1024 * 1024),
+  EXEC_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(30 * 1000),
+  EXEC_MAX_STATEMENTS: z.coerce.number().int().positive().default(500),
   IMPORT_TIMEOUT_MS: z.coerce
     .number()
     .int()

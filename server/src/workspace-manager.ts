@@ -725,17 +725,21 @@ export class WorkspaceManager {
     let closedIdleSessions = 0;
     let truncatedWorkspaces = 0;
 
-    // 1. Workspace idle TTL (2 h) and absolute max TTL (12 h) — skip busy workspaces
+    // 1. Workspace idle TTL (2 h) and absolute max TTL (12 h).
+    // Idle-expired workspaces wait for active sessions; workspaces past absoluteExpiresAt
+    // are forcibly torn down via deleteWorkspace (which sets sessionAbort and runs KILL QUERY).
     for (const [wsId, ws] of [...this.workspaces.entries()]) {
-      if (now >= ws.expiresAt || now >= ws.absoluteExpiresAt) {
-        if (this.isWorkspaceBusy(ws)) {
+      const pastAbsolute = now >= ws.absoluteExpiresAt;
+      if (now >= ws.expiresAt || pastAbsolute) {
+        if (ws.teardownActive || ws.deleting) continue;
+        if (!pastAbsolute && this.isWorkspaceBusy(ws)) {
           this.logger.debug(
             { wsId, database: ws.database },
             'Skipping expired workspace with busy session until next janitor sweep',
           );
           continue;
         }
-        const reason = now >= ws.absoluteExpiresAt ? 'absolute_ttl' : 'idle_ttl';
+        const reason = pastAbsolute ? 'absolute_ttl' : 'idle_ttl';
         this.logger.info({ wsId, database: ws.database, reason }, 'Expiring workspace');
         try {
           await this.deleteWorkspace(wsId);

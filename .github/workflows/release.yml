@@ -17,7 +17,7 @@ jobs:
     name: CI on Tag
     uses: ./.github/workflows/ci.yml
     with:
-      ref: refs/tags/${{ github.ref_name }}
+      ref: ${{ github.sha }}
 
   publish:
     name: Build & Publish Multi-Arch Images
@@ -30,16 +30,28 @@ jobs:
       - name: Checkout tagged commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ github.ref_name }}
+          ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify tag matches package.json and capture commit metadata
+      - name: Verify tag format, main ancestry, and package.json version
         id: rev
         env:
           TAG: ${{ github.ref_name }}
+          TARGET_SHA: ${{ github.sha }}
         run: |
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Tag must match vX.Y.Z (got: $TAG)"
+            exit 1
+          fi
+          head_sha=$(git rev-parse HEAD)
+          if [ "$head_sha" != "$TARGET_SHA" ]; then
+            echo "::error::Checked-out HEAD (${head_sha}) does not match github.sha (${TARGET_SHA})"
+            exit 1
+          fi
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "${TARGET_SHA}" refs/remotes/origin/main; then
+            echo "::error::Tagged commit (${TARGET_SHA}) is not an ancestor of origin/main"
             exit 1
           fi
           pkg_version=$(node -p "require('./package.json').version")
@@ -50,7 +62,7 @@ jobs:
           {
             echo "version=${pkg_version}"
             echo "short_sha=$(git rev-parse --short HEAD)"
-            echo "full_sha=$(git rev-parse HEAD)"
+            echo "full_sha=${head_sha}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU

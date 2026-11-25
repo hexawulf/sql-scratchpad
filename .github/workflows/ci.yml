@@ -7,7 +7,7 @@ on:
   workflow_call:
     inputs:
       ref:
-        description: Git ref to test (release.yml passes refs/tags/vX.Y.Z)
+        description: Git ref or commit SHA to test (release.yml passes github.sha)
         type: string
         default: ''
 

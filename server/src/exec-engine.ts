@@ -613,6 +613,40 @@ interface RawCallbackConnection {
   query(options: { sql: string; rowsAsArray: true }): RawCallbackQuery;
 }
 
+/**
+ * mysql2 routes fatal socket errors (EPIPE, ECONNRESET, server-side close after an
+ * oversized packet) to the *connection* emitter, not to a raw query emitter that was
+ * started without a callback. Without this guard a streaming query promise never
+ * settles when the connection dies mid-statement, pinning the request (and any
+ * concurrency slot it holds) forever. Returns a cleanup function.
+ */
+export function onRawConnectionFailure(rawConn: unknown, onFail: (err: Error) => void): () => void {
+  const emitter = rawConn as Partial<EventEmitter> | null;
+  if (
+    !emitter ||
+    typeof emitter.on !== 'function' ||
+    typeof emitter.removeListener !== 'function'
+  ) {
+    return () => {};
+  }
+  const onError = (err: Error): void => {
+    onFail(err);
+  };
+  const onEnd = (): void => {
+    onFail(
+      Object.assign(new Error('Connection closed during query'), {
+        code: 'PROTOCOL_CONNECTION_LOST',
+      }),
+    );
+  };
+  emitter.on('error', onError);
+  emitter.on('end', onEnd);
+  return () => {
+    emitter.removeListener!('error', onError);
+    emitter.removeListener!('end', onEnd);
+  };
+}
+
 function getRawCallbackConnection(
   conn: import('mysql2/promise').Connection,
 ): RawCallbackConnection | null {
@@ -649,6 +683,12 @@ function executeStreamingQuery(
     let bytesAdded = 0;
     let header: ResultSetHeader | undefined;
     let killRequested = false;
+    const detachConnGuard = onRawConnectionFailure(rawConn, (err) => {
+      if (settled) return;
+      settled = true;
+      detachConnGuard();
+      reject(err);
+    });
 
     const triggerKillOnce = (): void => {
       if (killRequested) return;
@@ -659,6 +699,7 @@ function executeStreamingQuery(
     const finishOk = (): void => {
       if (settled) return;
       settled = true;
+      detachConnGuard();
       if (isRowSet) {
         resolve({
           kind: 'rows',
@@ -726,6 +767,7 @@ function executeStreamingQuery(
         return;
       }
       settled = true;
+      detachConnGuard();
       reject(err);
     });
 

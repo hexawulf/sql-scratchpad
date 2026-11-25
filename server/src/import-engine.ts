@@ -12,6 +12,7 @@ import type { AppConfig } from './config.js';
 import { ApiError } from './errors.js';
 import {
   checkDenylistDetail,
+  onRawConnectionFailure,
   splitMariaDbStatements,
   stripCommentsAndLiterals,
 } from './exec-engine.js';
@@ -470,10 +471,17 @@ function executeImportStatementStreaming(
     let warningStatus = 0;
     let discardedBytes = 0;
     let killRequested = false;
+    const detachConnGuard = onRawConnectionFailure(rawConn, (err) => {
+      if (settled) return;
+      settled = true;
+      detachConnGuard();
+      reject(err);
+    });
 
     const finish = (): void => {
       if (settled) return;
       settled = true;
+      detachConnGuard();
       resolve({ warningStatus });
     };
 
@@ -504,6 +512,7 @@ function executeImportStatementStreaming(
         return;
       }
       settled = true;
+      detachConnGuard();
       reject(err);
     });
 

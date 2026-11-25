@@ -15,6 +15,7 @@ services:
       - internal
     mem_limit: 512m
     cpus: 1.5
+    pids_limit: 256
     security_opt:
       - 'no-new-privileges:true'
     logging:
@@ -54,6 +55,7 @@ services:
       - 'no-new-privileges:true'
     mem_limit: 192m
     cpus: 1.0
+    pids_limit: 64
     logging:
       driver: json-file
       options:

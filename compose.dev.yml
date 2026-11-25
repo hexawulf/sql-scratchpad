@@ -14,6 +14,7 @@ services:
       - sql-scratchpad-dev-db:/var/lib/mysql
     mem_limit: 512m
     cpus: 1.5
+    pids_limit: 256
     security_opt:
       - 'no-new-privileges:true'
     labels:

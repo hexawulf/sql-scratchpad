@@ -602,4 +602,52 @@ describe('M8-lite hardening unit checks', () => {
       await ctx.app.close();
     }
   });
+
+  it('rejects cross-site state-changing requests with 403 before consuming rate-limit budget [WEB-001]', async () => {
+    const cfg = loadConfig(BASE_ENV);
+    const ctx = await buildApp({
+      config: cfg,
+      adminPool: makeMockPool(true),
+      enableRateLimit: true,
+      staticDir,
+    });
+
+    try {
+      // 25 cross-site POSTs from evil.example must all get 403 and NOT burn the 20/h bucket
+      for (let i = 0; i < 25; i += 1) {
+        const res = await ctx.app.inject({
+          method: 'POST',
+          url: '/api/workspaces',
+          remoteAddress: '198.51.100.77',
+          headers: {
+            host: 'sql-scratchpad.example',
+            origin: 'https://evil.example',
+            'sec-fetch-site': 'cross-site',
+            'content-type': 'text/plain',
+          },
+          payload: 'x',
+        });
+        expect(res.statusCode).toBe(403);
+        expect(JSON.parse(res.body)).toMatchObject({
+          error: { code: 'CROSS_SITE_FORBIDDEN' },
+        });
+      }
+
+      // Subsequent same-origin request still has its full rate-limit quota (reaches 400 unknown dataset, not 429)
+      const legit = await ctx.app.inject({
+        method: 'POST',
+        url: '/api/workspaces',
+        remoteAddress: '198.51.100.77',
+        headers: {
+          host: 'sql-scratchpad.example',
+          origin: 'https://sql-scratchpad.example',
+          'sec-fetch-site': 'same-origin',
+        },
+        payload: { dataset: 'nonexistent-dataset' },
+      });
+      expect(legit.statusCode).toBe(400);
+    } finally {
+      await ctx.app.close();
+    }
+  });
 });

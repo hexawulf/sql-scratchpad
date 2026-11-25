@@ -195,6 +195,48 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     });
   }
 
+  // Reject cross-site state-changing requests BEFORE rate limiting so third-party pages
+  // cannot burn a victim's per-IP rate-limit buckets [WEB-001]
+  app.addHook('onRequest', async (req, reply) => {
+    const method = req.method.toUpperCase();
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+      return;
+    }
+
+    const fetchSite = req.headers['sec-fetch-site'];
+    if (typeof fetchSite === 'string' && fetchSite.toLowerCase() === 'cross-site') {
+      req.log.warn(
+        { event: 'authz.forbidden', code: 'CROSS_SITE_FORBIDDEN' },
+        'Blocked cross-site request',
+      );
+      return reply
+        .code(403)
+        .send(formatApiError('CROSS_SITE_FORBIDDEN', 'Cross-site requests are not allowed'));
+    }
+
+    const origin = req.headers.origin;
+    if (typeof origin === 'string' && origin.length > 0) {
+      const requestHost = typeof req.headers.host === 'string' ? req.headers.host.trim() : '';
+      let originHost: string | null = null;
+      if (origin !== 'null') {
+        try {
+          originHost = new URL(origin).host;
+        } catch {
+          originHost = null;
+        }
+      }
+      if (!originHost || !requestHost || originHost.toLowerCase() !== requestHost.toLowerCase()) {
+        req.log.warn(
+          { event: 'authz.forbidden', code: 'CROSS_SITE_FORBIDDEN' },
+          'Blocked mismatched Origin request',
+        );
+        return reply
+          .code(403)
+          .send(formatApiError('CROSS_SITE_FORBIDDEN', 'Cross-site requests are not allowed'));
+      }
+    }
+  });
+
   if (rateLimitEnabled) {
     await app.register(rateLimit, {
       global: false,

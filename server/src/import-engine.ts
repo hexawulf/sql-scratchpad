@@ -14,14 +14,57 @@ import type { WorkspaceManager } from './workspace-manager.js';
 
 const MAX_REPORTED_ITEMS = 100;
 const BATCH_COMMIT_INTERVAL = 1000;
+const MAX_BUDGET_TRACKED_KEYS = 50_000;
 
 export class ImportByteBudget {
   private readonly usage = new Map<string, Array<{ ts: number; bytes: number }>>();
+  private pruneTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly maxBytesPerWindow: number,
     private readonly windowMs: number = 60 * 60 * 1000,
+    private readonly maxTrackedKeys: number = MAX_BUDGET_TRACKED_KEYS,
   ) {}
+
+  get trackedKeyCount(): number {
+    return this.usage.size;
+  }
+
+  startPruner(intervalMs = 5 * 60 * 1000): void {
+    if (this.pruneTimer) return;
+    this.pruneTimer = setInterval(() => {
+      this.prune();
+    }, intervalMs);
+    this.pruneTimer.unref();
+  }
+
+  stopPruner(): void {
+    if (this.pruneTimer) {
+      clearInterval(this.pruneTimer);
+      this.pruneTimer = null;
+    }
+  }
+
+  prune(now: number = Date.now()): number {
+    const cutoff = now - this.windowMs;
+    let removed = 0;
+    for (const [key, entries] of this.usage.entries()) {
+      const newest = entries[entries.length - 1];
+      if (!newest || newest.ts <= cutoff) {
+        this.usage.delete(key);
+        removed += 1;
+      } else {
+        const active = entries.filter((e) => e.ts > cutoff);
+        if (active.length === 0) {
+          this.usage.delete(key);
+          removed += 1;
+        } else if (active.length !== entries.length) {
+          this.usage.set(key, active);
+        }
+      }
+    }
+    return removed;
+  }
 
   consume(
     key: string,
@@ -29,8 +72,17 @@ export class ImportByteBudget {
     now: number = Date.now(),
   ): { allowed: true; remainingBytes: number } | { allowed: false; retryAfterSec: number } {
     const cutoff = now - this.windowMs;
-    const existing = this.usage.get(key) ?? [];
-    const active = existing.filter((e) => e.ts > cutoff);
+    const existing = this.usage.get(key);
+    if (!existing && this.usage.size >= this.maxTrackedKeys) {
+      this.prune(now);
+      if (this.usage.size >= this.maxTrackedKeys) {
+        return {
+          allowed: false,
+          retryAfterSec: Math.max(1, Math.ceil(this.windowMs / 1000)),
+        };
+      }
+    }
+    const active = (existing ?? []).filter((e) => e.ts > cutoff);
 
     let used = 0;
     for (const entry of active) {

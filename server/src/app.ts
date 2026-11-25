@@ -225,6 +225,7 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
   const execEngine = new ExecEngine(workspaceManager, config);
   const importEngine = new ImportEngine(workspaceManager, config);
   const importByteBudget = new ImportByteBudget(config.IMPORT_BYTE_BUDGET_PER_HOUR);
+  importByteBudget.startPruner();
 
   let activeImportsGlobal = 0;
   const activeImportsByKey = new Map<string, number>();
@@ -489,6 +490,7 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
   );
 
   app.addHook('onClose', async () => {
+    importByteBudget.stopPruner();
     await workspaceManager.closeAllWorkspaces(false);
     if (ownsPool) {
       await adminPool.end();

@@ -378,6 +378,21 @@ describe('import helpers: classifyImportSkip, rewriteDefinerClauses, ImportByteB
     });
   });
 
+  it('prunes expired keys and bounds max tracked keys in ImportByteBudget [LOGIC-005]', () => {
+    const budget = new ImportByteBudget(1000, 60_000, 3);
+    const t0 = 1_000_000;
+    expect(budget.consume('k1', 100, t0).allowed).toBe(true);
+    expect(budget.consume('k2', 100, t0).allowed).toBe(true);
+    expect(budget.consume('k3', 100, t0).allowed).toBe(true);
+    expect(budget.trackedKeyCount).toBe(3);
+    // 4th distinct key fails closed while 3 active keys fill the cap
+    expect(budget.consume('k4', 100, t0 + 1000).allowed).toBe(false);
+    // After window expiry, prune removes stale keys and allows new keys
+    expect(budget.prune(t0 + 61_000)).toBe(3);
+    expect(budget.trackedKeyCount).toBe(0);
+    expect(budget.consume('k4', 100, t0 + 61_000).allowed).toBe(true);
+  });
+
   it('classifies ReDoS-adversarial conditional comments and trailing semicolons in linear time [INJECTION-001]', () => {
     const spacesPayload = `/*!40101${' '.repeat(10_000)}SELECT 1`;
     const semisPayload = `SELECT 1${';'.repeat(20_000)}x`;

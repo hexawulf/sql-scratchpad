@@ -27,9 +27,19 @@ export function formatCellText(value: unknown): string {
   return String(value);
 }
 
+const FORMULA_PREFIX_RE = /^[=+\-@]/;
+
 function escapeTsvCell(value: unknown): string {
-  const text = formatCellText(value);
-  return text.replace(/\t/g, ' ').replace(/\r?\n/g, ' ');
+  const raw = formatCellText(value);
+  const hadLeadingControl = raw.startsWith('\t') || raw.startsWith('\r');
+  let safe = raw.replace(/\t/g, ' ').replace(/\r\n|\r|\n/g, ' ');
+  if (!isNumericValue(value) && (hadLeadingControl || FORMULA_PREFIX_RE.test(safe.trimStart()))) {
+    safe = `'${safe}`;
+  }
+  if (safe.startsWith('"')) {
+    safe = `"${safe.replace(/"/g, '""')}"`;
+  }
+  return safe;
 }
 
 export function toTsv(columns: ColumnMeta[], rows: unknown[][]): string {
@@ -39,7 +49,12 @@ export function toTsv(columns: ColumnMeta[], rows: unknown[][]): string {
 }
 
 function escapeMdCell(value: unknown): string {
-  return formatCellText(value).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  return formatCellText(value)
+    .replace(/\r\n|\r|\n/g, ' ')
+    .replace(/\\/g, '\\\\')
+    .replace(/([|`[\]!])/g, '\\$1')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 export function toMarkdownTable(columns: ColumnMeta[], rows: unknown[][]): string {

@@ -220,6 +220,36 @@ describe('export-grid utilities', () => {
       '| genre | book_count |\n| --- | ---: |\n| Fiction | 3 |\n| Science | NULL |',
     );
   });
+
+  it('neutralises spreadsheet formulas in TSV and escapes Markdown/HTML metacharacters [WEB-004]', () => {
+    const cols = [
+      { name: '=HDR', type: 'VARCHAR' },
+      { name: 'val', type: 'VARCHAR' },
+      { name: 'num', type: 'INT' },
+    ];
+    const rows = [
+      ['=1+1', '+SUM(A1)', -42],
+      ['-cmd', '@calc', '-3.14'],
+      ['\r=evil\rline', '"quoted"', 0],
+    ];
+    const tsv = toTsv(cols, rows);
+    const lines = tsv.split('\n');
+    expect(lines[0]).toBe("'=HDR\tval\tnum");
+    expect(lines[1]).toBe("'=1+1\t'+SUM(A1)\t-42");
+    expect(lines[2]).toBe("'-cmd\t'@calc\t-3.14");
+    expect(lines[3]).toBe('\' =evil line\t"""quoted"""\t0');
+
+    const md = toMarkdownTable(
+      [{ name: 'col', type: 'VARCHAR' }],
+      [['<script>x</script> ![img](https://e) `code` a|b \\c\rd']],
+    );
+    expect(md).toContain('&lt;script&gt;x&lt;/script&gt;');
+    expect(md).toContain('\\!\\[img\\](https://e)');
+    expect(md).toContain('\\`code\\`');
+    expect(md).toContain('a\\|b');
+    expect(md).toContain('\\\\c d');
+    expect(md).not.toContain('\r');
+  });
 });
 
 describe('storage and session toggle SQL', () => {

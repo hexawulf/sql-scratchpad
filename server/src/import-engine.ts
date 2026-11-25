@@ -455,6 +455,21 @@ function executeImportStatementStreaming(
   });
 }
 
+interface SchemaBytesRow extends RowDataPacket {
+  bytes: number | string | null;
+}
+
+async function queryWorkspaceSizeBytes(conn: Connection): Promise<number> {
+  try {
+    const [rows] = await conn.query<SchemaBytesRow[]>(
+      'SELECT COALESCE(SUM(data_length + index_length), 0) AS bytes FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()',
+    );
+    return Number(rows[0]?.bytes ?? 0) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 async function listWorkspaceTables(conn: Connection): Promise<string[]> {
   const [rows] = await conn.query<TableNameRow[]>(
     `SELECT TABLE_NAME
@@ -548,6 +563,20 @@ export class ImportEngine {
 
       for (let i = 0; i < statements.length; i += 1) {
         const stmt = statements[i]!;
+
+        if (i === 0 || i % 250 === 0) {
+          const currentBytes = await queryWorkspaceSizeBytes(session.conn);
+          if (currentBytes > this.config.MAX_WORKSPACE_BYTES) {
+            importError = {
+              index: i,
+              startLine: stmt.startLine,
+              code: 'WORKSPACE_STORAGE_LIMIT',
+              message: 'Workspace storage limit exceeded during import',
+              alreadyApplied: statementsOk > 0,
+            };
+            break;
+          }
+        }
 
         if (this.workspaceManager.isSessionAbortRequested(ws, 'A')) {
           importError = {

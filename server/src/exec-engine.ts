@@ -570,6 +570,21 @@ function executeStreamingQuery(
   });
 }
 
+interface SchemaBytesRow extends RowDataPacket {
+  bytes: number | string | null;
+}
+
+async function queryWorkspaceSizeBytes(conn: import('mysql2/promise').Connection): Promise<number> {
+  try {
+    const [rows] = await conn.query<SchemaBytesRow[]>(
+      'SELECT COALESCE(SUM(data_length + index_length), 0) AS bytes FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()',
+    );
+    return Number(rows[0]?.bytes ?? 0) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 export class ExecEngine {
   constructor(
     private readonly workspaceManager: WorkspaceManager,
@@ -596,11 +611,38 @@ export class ExecEngine {
         );
       }
 
+      const initialBytes = await queryWorkspaceSizeBytes(session.conn);
+      if (initialBytes > this.config.MAX_WORKSPACE_BYTES) {
+        throw new ApiError(
+          507,
+          'WORKSPACE_STORAGE_LIMIT',
+          'Workspace storage limit exceeded. Reset the workspace to continue.',
+        );
+      }
+
       const deadlineMs = Date.now() + this.config.EXEC_TIMEOUT_MS;
 
       for (let i = 0; i < statements.length; i += 1) {
         const stmt = statements[i]!;
         const t0 = process.hrtime.bigint();
+
+        if (i > 0 && i % 25 === 0) {
+          const currentBytes = await queryWorkspaceSizeBytes(session.conn);
+          if (currentBytes > this.config.MAX_WORKSPACE_BYTES) {
+            results.push({
+              index: i,
+              sql: stmt.sql,
+              startLine: stmt.startLine,
+              kind: 'error',
+              error: {
+                code: 'WORKSPACE_STORAGE_LIMIT',
+                message: 'Workspace storage limit exceeded. Reset the workspace to continue.',
+              },
+              durationMs: 0,
+            });
+            break;
+          }
+        }
 
         if (this.workspaceManager.isSessionAbortRequested(ws, req.session)) {
           results.push({

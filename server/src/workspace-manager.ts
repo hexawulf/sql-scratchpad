@@ -820,21 +820,15 @@ export class WorkspaceManager {
       }
     }
 
-    // 3. Per-workspace 50 MB size cap — skip busy workspaces
+    // 3. Per-workspace 50 MB size cap — forcibly reset oversized workspaces even if busy
     const sizes = await this.getWorkspaceSizes();
     for (const ws of [...this.workspaces.values()]) {
+      if (ws.teardownActive || ws.deleting) continue;
       const bytes = sizes.get(ws.database) ?? 0;
       if (bytes > this.config.MAX_WORKSPACE_BYTES) {
-        if (this.isWorkspaceBusy(ws)) {
-          this.logger.info(
-            { wsId: ws.wsId, database: ws.database, bytes, cap: this.config.MAX_WORKSPACE_BYTES },
-            'Oversized workspace has busy session; deferring truncation to next sweep',
-          );
-          continue;
-        }
         this.logger.warn(
           { wsId: ws.wsId, database: ws.database, bytes, cap: this.config.MAX_WORKSPACE_BYTES },
-          'Workspace exceeded size cap; truncating and re-provisioning',
+          'Workspace exceeded size cap; interrupting active sessions and re-provisioning',
         );
         try {
           await this.resetWorkspace(ws.wsId, ws.dataset);

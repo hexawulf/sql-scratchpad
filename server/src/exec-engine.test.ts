@@ -767,3 +767,125 @@ describe('WorkspaceManager synchronous capacity reservation [LOGIC-002]', () => 
     expect(wm.getWorkspaceCount()).toBe(2);
   });
 });
+
+describe('In-path storage cap and janitor busy-oversized enforcement [LOGIC-003]', () => {
+  const cfg = loadConfig({
+    SQLSCRATCHPAD_ADMIN_PASSWORD: 'test-password',
+    LOG_LEVEL: 'silent',
+    MAX_WORKSPACE_BYTES: '1024',
+  });
+
+  function makeWs(): WorkspaceEntry {
+    const now = Date.now();
+    return {
+      wsId: 'wsidstorage123',
+      database: 'ws_storage1234',
+      dbUser: 'ws_storage1234',
+      password: 'pw',
+      dataset: 'empty',
+      createdAt: now,
+      lastActiveAt: now,
+      expiresAt: now + 60_000,
+      absoluteExpiresAt: now + 60_000,
+      sessions: {},
+      sessionLocks: {},
+      sessionWaiters: {},
+      sessionAbort: {},
+      teardownActive: false,
+      deleting: false,
+    };
+  }
+
+  it('rejects /exec with 507 WORKSPACE_STORAGE_LIMIT and aborts /import when schema exceeds MAX_WORKSPACE_BYTES', async () => {
+    const ws = makeWs();
+    const session: PinnedSession = {
+      id: 'A',
+      conn: {
+        query: async (arg: string | { sql: string }) => {
+          const sql = typeof arg === 'string' ? arg : arg.sql;
+          if (sql.includes('data_length + index_length')) {
+            return [[{ bytes: 2048 }], []];
+          }
+          if (sql.includes('@@in_transaction')) return [[{ in_tx: 0, auto_c: 1 }], []];
+          return [[], []];
+        },
+        end: async () => {},
+        destroy: () => {},
+      } as unknown as Connection,
+      threadId: 55,
+      busy: true,
+      lastUsedAt: Date.now(),
+    };
+    const fakeWm = {
+      getWorkspace: () => ws,
+      touchWorkspace: () => {},
+      acquireSession: async () => session,
+      releaseSession: () => {},
+      isSessionAbortRequested: () => false,
+    } as unknown as WorkspaceManager;
+
+    const execEngine = new ExecEngine(fakeWm, cfg);
+    await expect(
+      execEngine.execute(ws.wsId, { sql: 'SELECT 1;', session: 'A', stopOnError: true }),
+    ).rejects.toMatchObject({ statusCode: 507, code: 'WORKSPACE_STORAGE_LIMIT' });
+
+    const importEngine = new ImportEngine(fakeWm, cfg);
+    const importRes = await importEngine.importSql(ws.wsId, {
+      sql: 'CREATE TABLE t (id INT);',
+      mode: 'append',
+    });
+    expect(importRes.ok).toBe(false);
+    expect(importRes.error?.code).toBe('WORKSPACE_STORAGE_LIMIT');
+  });
+
+  it('janitor interrupts and resets busy oversized workspaces instead of skipping them', async () => {
+    const killedThreads: number[] = [];
+    const fakeConn = {
+      query: async () => [[], []],
+      release: () => {},
+    };
+    const fakePool = {
+      query: async (sql: string) => {
+        if (sql.includes('data_length + index_length')) {
+          return [[{ table_schema: 'ws_storage1234', bytes: 2048 }], []];
+        }
+        const m = /^KILL QUERY (\d+)$/.exec(sql);
+        if (m) {
+          killedThreads.push(Number(m[1]));
+          ws.sessionLocks.A = false;
+          if (ws.sessions.A) ws.sessions.A.busy = false;
+          wm.releaseSession(ws, 'A', ws.sessions.A);
+        }
+        return [[], []];
+      },
+      getConnection: async () => fakeConn,
+    } as unknown as Pool;
+    const silentLogger = {
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      debug: () => {},
+    } as unknown as FastifyBaseLogger;
+
+    const wm = new WorkspaceManager(
+      fakePool,
+      cfg,
+      [{ id: 'empty', title: 'Empty', description: 'Empty', tables: [], engines: ['mariadb'] }],
+      silentLogger,
+    );
+    const ws = makeWs();
+    ws.sessionLocks.A = true;
+    ws.sessions.A = {
+      id: 'A',
+      conn: { end: async () => {}, destroy: () => {} } as unknown as Connection,
+      threadId: 888,
+      busy: true,
+      lastUsedAt: Date.now(),
+    };
+    (wm as unknown as { workspaces: Map<string, WorkspaceEntry> }).workspaces.set(ws.wsId, ws);
+
+    const sweep = await wm.runJanitorSweep();
+    expect(killedThreads).toContain(888);
+    expect(sweep.truncatedWorkspaces).toBe(1);
+  });
+});

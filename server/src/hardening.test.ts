@@ -402,4 +402,109 @@ describe('M8-lite hardening unit checks', () => {
     expect(loadConfig(BASE_ENV).IMPORT_TIMEOUT_MS).toBe(75 * 1000);
     expect(loadConfig({ ...BASE_ENV, IMPORT_TIMEOUT_MS: '60000' }).IMPORT_TIMEOUT_MS).toBe(60_000);
   });
+
+  it('rejects /import early for nonexistent wsId and enforces in-flight concurrency caps [API-004]', async () => {
+    const cfg = loadConfig(BASE_ENV);
+    const ctx = await buildApp({
+      config: cfg,
+      adminPool: makeMockPool(true),
+      enableRateLimit: false,
+      staticDir,
+    });
+
+    try {
+      // Nonexistent wsId fails with 404 in onRequest even with invalid/oversized Content-Length
+      const missingRes = await ctx.app.inject({
+        method: 'POST',
+        url: '/api/workspaces/aaaaaaaaaaaa/import',
+        headers: { 'content-type': 'application/json' },
+        payload: { sql: 'SELECT 1;' },
+      });
+      expect(missingRes.statusCode).toBe(404);
+      expect(JSON.parse(missingRes.body)).toMatchObject({
+        error: { code: 'WORKSPACE_NOT_FOUND' },
+      });
+
+      // Oversized Content-Length rejected with 413 before buffering
+      const tooBigRes = await ctx.app.inject({
+        method: 'POST',
+        url: '/api/workspaces/aaaaaaaaaaaa/import',
+        headers: { 'content-type': 'application/json', 'content-length': String(10 * 1024 * 1024) },
+        payload: '{}',
+      });
+      expect(tooBigRes.statusCode).toBe(413);
+
+      // Concurrent import semaphore: inject a workspace and stall importSql
+      const now = Date.now();
+      (
+        ctx.workspaceManager as unknown as {
+          workspaces: Map<string, Record<string, unknown>>;
+        }
+      ).workspaces.set('bbbbbbbbbbbb', {
+        wsId: 'bbbbbbbbbbbb',
+        database: 'ws_bbbbbbbbbbbb',
+        dbUser: 'ws_bbbbbbbbbbbb',
+        password: 'pw',
+        dataset: 'empty',
+        createdAt: now,
+        lastActiveAt: now,
+        expiresAt: now + 60_000,
+        absoluteExpiresAt: now + 60_000,
+        sessions: {},
+        sessionLocks: {},
+        sessionWaiters: {},
+        sessionAbort: {},
+        teardownActive: false,
+        deleting: false,
+      });
+
+      let releaseFirst!: () => void;
+      const firstGate = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      ctx.importEngine.importSql = async () => {
+        await firstGate;
+        return {
+          ok: true,
+          mode: 'append',
+          totalStatements: 1,
+          statementsRun: 1,
+          statementsOk: 1,
+          skippedCount: 0,
+          skipped: [],
+          rewrittenCount: 0,
+          rewritten: [],
+          warningsCount: 0,
+          durationMs: 1,
+          tablesCreated: [],
+        };
+      };
+
+      const req1 = ctx.app.inject({
+        method: 'POST',
+        url: '/api/workspaces/bbbbbbbbbbbb/import',
+        remoteAddress: '198.51.100.5',
+        payload: { sql: 'SELECT 1;', mode: 'append' },
+      });
+      await new Promise((r) => setTimeout(r, 25));
+
+      // Second concurrent import from same client IP hits per-IP concurrency limit (429)
+      const req2 = await ctx.app.inject({
+        method: 'POST',
+        url: '/api/workspaces/bbbbbbbbbbbb/import',
+        remoteAddress: '198.51.100.5',
+        payload: { sql: 'SELECT 1;', mode: 'append' },
+      });
+      expect(req2.statusCode).toBe(429);
+      expect(JSON.parse(req2.body)).toMatchObject({
+        error: { code: 'IMPORT_CONCURRENCY_LIMIT' },
+      });
+
+      releaseFirst();
+      const res1 = await req1;
+      expect(res1.statusCode).toBe(200);
+    } finally {
+      await ctx.app.close();
+    }
+  });
 });

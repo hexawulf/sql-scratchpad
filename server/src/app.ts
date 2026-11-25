@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import type { Pool } from 'mysql2/promise';
 import type {
@@ -45,6 +45,8 @@ const PKG_VERSION: string = (() => {
 export const BODY_LIMIT_BYTES = 256 * 1024;
 const IMPORT_SQL_MAX_BYTES = 6 * 1024 * 1024;
 const IMPORT_BODY_LIMIT_BYTES = 7 * 1024 * 1024;
+const MAX_CONCURRENT_IMPORTS_GLOBAL = 2;
+const MAX_CONCURRENT_IMPORTS_PER_IP = 1;
 
 export interface BuildAppOptions {
   config: AppConfig;
@@ -128,7 +130,11 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     logger: buildLoggerOptions(config.LOG_LEVEL, ipHasher, options.logStream),
     bodyLimit: BODY_LIMIT_BYTES,
     trustProxy: parseTrustProxy(config.TRUST_PROXY),
+    connectionTimeout: 30_000,
+    keepAliveTimeout: 30_000,
+    requestTimeout: Math.max(90_000, config.IMPORT_TIMEOUT_MS + 15_000),
   });
+  app.server.maxConnections = 256;
 
   app.setErrorHandler(fastifyErrorHandler);
 
@@ -186,6 +192,28 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
   const execEngine = new ExecEngine(workspaceManager, config);
   const importEngine = new ImportEngine(workspaceManager, config);
   const importByteBudget = new ImportByteBudget(config.IMPORT_BYTE_BUDGET_PER_HOUR);
+
+  let activeImportsGlobal = 0;
+  const activeImportsByKey = new Map<string, number>();
+  const importSlotReleases = new WeakMap<FastifyRequest, () => void>();
+
+  const releaseImportSlot = (req: FastifyRequest): void => {
+    const release = importSlotReleases.get(req);
+    if (release) {
+      importSlotReleases.delete(req);
+      release();
+    }
+  };
+
+  app.addHook('onResponse', async (req) => {
+    releaseImportSlot(req);
+  });
+  app.addHook('onError', async (req) => {
+    releaseImportSlot(req);
+  });
+  app.addHook('onRequestAbort', async (req) => {
+    releaseImportSlot(req);
+  });
 
   if (options.cleanupOrphansOnBoot) {
     await workspaceManager.cleanupOrphans();
@@ -276,6 +304,64 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
       bodyLimit: IMPORT_BODY_LIMIT_BYTES,
       schema: { params: wsIdParamsSchema, body: importBodySchema },
       config: rateLimitEnabled ? { rateLimit: { max: 20, timeWindow: '1 hour' } } : undefined,
+      onRequest: async (req, reply) => {
+        // Reject oversized Content-Length and nonexistent workspaces before buffering 7 MB body
+        const rawContentLength = req.headers['content-length'];
+        if (typeof rawContentLength === 'string') {
+          const contentLength = Number(rawContentLength);
+          if (Number.isFinite(contentLength) && contentLength > IMPORT_BODY_LIMIT_BYTES) {
+            return reply
+              .code(413)
+              .send(formatApiError('PAYLOAD_TOO_LARGE', 'Request body exceeds 6 MB limit'));
+          }
+        }
+
+        const wsId = (req.params as { wsId?: string } | undefined)?.wsId;
+        if (!wsId || !/^[a-z2-7]{8,64}$/.test(wsId)) {
+          return reply
+            .code(400)
+            .send(formatApiError('VALIDATION_ERROR', 'Invalid workspace identifier'));
+        }
+        // Throws 404 WORKSPACE_NOT_FOUND / WORKSPACE_EXPIRED before reading request body
+        workspaceManager.getWorkspace(wsId);
+
+        const clientKey = ipHasher.key(req.ip || 'unknown');
+        const perClient = activeImportsByKey.get(clientKey) ?? 0;
+        if (perClient >= MAX_CONCURRENT_IMPORTS_PER_IP) {
+          void reply.header('Retry-After', '5');
+          return reply
+            .code(429)
+            .send(
+              formatApiError(
+                'IMPORT_CONCURRENCY_LIMIT',
+                'Another import is already in progress for this client. Wait for it to finish.',
+              ),
+            );
+        }
+        if (activeImportsGlobal >= MAX_CONCURRENT_IMPORTS_GLOBAL) {
+          void reply.header('Retry-After', '5');
+          return reply
+            .code(503)
+            .send(
+              formatApiError(
+                'IMPORT_BUSY',
+                'Server is busy processing other imports. Please retry in a few seconds.',
+              ),
+            );
+        }
+
+        activeImportsGlobal += 1;
+        activeImportsByKey.set(clientKey, perClient + 1);
+        importSlotReleases.set(req, () => {
+          activeImportsGlobal = Math.max(0, activeImportsGlobal - 1);
+          const cur = activeImportsByKey.get(clientKey) ?? 1;
+          if (cur <= 1) {
+            activeImportsByKey.delete(clientKey);
+          } else {
+            activeImportsByKey.set(clientKey, cur - 1);
+          }
+        });
+      },
       preHandler: async (req, reply) => {
         const bytes = Buffer.byteLength(req.body.sql, 'utf8');
         if (req.body.sql.length > IMPORT_SQL_MAX_BYTES || bytes > IMPORT_SQL_MAX_BYTES) {

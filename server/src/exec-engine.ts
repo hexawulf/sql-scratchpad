@@ -13,8 +13,10 @@ import type {
   StatementResult,
   StatementWarning,
 } from '@sql-scratchpad/shared';
+import type { FastifyBaseLogger } from 'fastify';
 import type { AppConfig } from './config.js';
 import { ApiError } from './errors.js';
+import type { IpHasher } from './logger.js';
 import type { WorkspaceManager } from './workspace-manager.js';
 
 export interface SplitStatement {
@@ -382,90 +384,110 @@ export function splitMariaDbStatements(sql: string, maxStatements?: number): Spl
 }
 
 type DenylistRule =
-  { pattern: RegExp; message: string } | { test: (cleaned: string) => boolean; message: string };
+  | { id: string; pattern: RegExp; message: string }
+  | { id: string; test: (cleaned: string) => boolean; message: string };
 
 const DENYLIST_RULES: DenylistRule[] = [
   {
+    id: 'grant',
     pattern: /\bGRANT\b/i,
     message:
       'Not available in the playground: GRANT is disabled (workspace privileges are managed automatically).',
   },
   {
+    id: 'revoke',
     pattern: /\bREVOKE\b/i,
     message:
       'Not available in the playground: REVOKE is disabled (workspace privileges are managed automatically).',
   },
   {
+    id: 'user_mgmt',
     pattern: /\b(?:CREATE\s+(?:OR\s+REPLACE\s+)?|DROP\s+|ALTER\s+|RENAME\s+)USER\b/i,
     message: 'Not available in the playground: user management statements are disabled.',
   },
   {
+    id: 'set_global',
     pattern: /\bSET\s+(?:GLOBAL|PERSIST|PERSIST_ONLY)\b|@@(?:GLOBAL|PERSIST|PERSIST_ONLY)\./i,
     message:
       'Not available in the playground: modifying global server variables is disabled. Use SET SESSION instead.',
   },
   {
+    id: 'set_password',
     pattern: /\bSET\s+PASSWORD\b/i,
     message: 'Not available in the playground: SET PASSWORD is disabled.',
   },
   {
+    id: 'plugin',
     pattern: /\b(?:UN)?INSTALL\s+(?:PLUGIN|SONAME|COMPONENT)\b/i,
     message: 'Not available in the playground: plugin management is disabled.',
   },
   {
+    id: 'udf_soname',
     test: (cleaned) =>
       /\bSONAME\b/i.test(cleaned) &&
       /\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:AGGREGATE\s+)?FUNCTION\b/i.test(cleaned),
     message: 'Not available in the playground: native UDF loading (SONAME) is disabled.',
   },
   {
+    id: 'shutdown',
     pattern: /\bSHUTDOWN\b/i,
     message: 'Not available in the playground: SHUTDOWN is disabled.',
   },
   {
+    id: 'load_data',
     pattern: /\bLOAD\s+(?:DATA|XML)\b/i,
     message: 'Not available in the playground: LOAD DATA / LOAD XML is disabled.',
   },
   {
+    id: 'outfile',
     pattern: /\bINTO\s+(?:OUTFILE|DUMPFILE)\b/i,
     message:
       'Not available in the playground: writing server files via INTO OUTFILE / DUMPFILE is disabled.',
   },
   {
+    id: 'benchmark',
     pattern: /\bBENCHMARK\s*\(/i,
     message: 'Not available in the playground: BENCHMARK() is disabled.',
   },
   {
+    id: 'dynamic_sql',
     pattern: /\b(?:PREPARE\s+\S+\s+FROM|EXECUTE\s+IMMEDIATE)\b/i,
     message:
       'Not available in the playground: dynamic SQL (PREPARE / EXECUTE IMMEDIATE) is disabled.',
   },
   {
+    id: 'advisory_lock',
     pattern: /\b(?:GET_LOCK|RELEASE_LOCK|RELEASE_ALL_LOCKS|IS_FREE_LOCK|IS_USED_LOCK)\s*\(/i,
     message: 'Not available in the playground: server-global advisory lock functions are disabled.',
   },
   {
+    id: 'global_metadata',
     pattern: /\bSHOW\s+GLOBAL\s+(?:STATUS|VARIABLES)\b/i,
     message:
       'Not available in the playground: SHOW GLOBAL STATUS/VARIABLES is disabled. Use SHOW SESSION instead.',
   },
   {
+    id: 'global_information_schema',
     pattern:
       /\binformation_schema\s*\.\s*(?:GLOBAL_STATUS|GLOBAL_VARIABLES|PLUGINS|ALL_PLUGINS)\b/i,
     message:
       'Not available in the playground: global server metadata tables in information_schema are disabled.',
   },
   {
+    id: 'data_directory',
     pattern: /\b(?:DATA|INDEX)\s+DIRECTORY\b/i,
     message: 'Not available in the playground: DATA DIRECTORY / INDEX DIRECTORY is disabled.',
   },
 ];
 
-function checkCleanedDenylist(cleaned: string, workspaceDb: string): string | null {
+function checkCleanedDenylist(
+  cleaned: string,
+  workspaceDb: string,
+): { ruleId: string; message: string } | null {
   for (const rule of DENYLIST_RULES) {
     const matched = 'pattern' in rule ? rule.pattern.test(cleaned) : rule.test(cleaned);
     if (matched) {
-      return rule.message;
+      return { ruleId: rule.id, message: rule.message };
     }
   }
 
@@ -474,14 +496,20 @@ function checkCleanedDenylist(cleaned: string, workspaceDb: string): string | nu
   if (useMatch) {
     const rawTarget = useMatch[1]!.replace(/^`|`$/g, '');
     if (rawTarget.toLowerCase() !== workspaceDb.toLowerCase()) {
-      return `Not available in the playground: USE ${rawTarget} is blocked (workspaces are isolated to ${workspaceDb}).`;
+      return {
+        ruleId: 'cross_db_use',
+        message: `Not available in the playground: USE ${rawTarget} is blocked (workspaces are isolated to ${workspaceDb}).`,
+      };
     }
   }
 
   return null;
 }
 
-export function checkDenylist(sql: string, workspaceDb: string): string | null {
+export function checkDenylistDetail(
+  sql: string,
+  workspaceDb: string,
+): { ruleId: string; message: string } | null {
   const defaultHit = checkCleanedDenylist(stripCommentsAndLiterals(sql, true), workspaceDb);
   if (defaultHit) return defaultHit;
 
@@ -492,6 +520,10 @@ export function checkDenylist(sql: string, workspaceDb: string): string | null {
   }
 
   return null;
+}
+
+export function checkDenylist(sql: string, workspaceDb: string): string | null {
+  return checkDenylistDetail(sql, workspaceDb)?.message ?? null;
 }
 
 // MariaDB / MySQL wire protocol field type codes (mysql2 Types)
@@ -722,6 +754,8 @@ export class ExecEngine {
   constructor(
     private readonly workspaceManager: WorkspaceManager,
     private readonly config: AppConfig,
+    private readonly logger?: FastifyBaseLogger,
+    private readonly ipHasher?: IpHasher,
   ) {}
 
   async execute(wsId: string, req: ExecRequest): Promise<ExecResponse> {
@@ -809,8 +843,17 @@ export class ExecEngine {
           break;
         }
 
-        const deniedMsg = checkDenylist(stmt.sql, ws.database);
-        if (deniedMsg) {
+        const denied = checkDenylistDetail(stmt.sql, ws.database);
+        if (denied) {
+          this.logger?.warn(
+            {
+              event: 'playground.denied',
+              ruleId: denied.ruleId,
+              wsIdHash: this.ipHasher?.tokenHash(ws.wsId),
+              session: req.session,
+            },
+            'Statement blocked by playground denylist',
+          );
           results.push({
             index: i,
             sql: stmt.sql,
@@ -818,7 +861,7 @@ export class ExecEngine {
             kind: 'error',
             error: {
               code: 'PLAYGROUND_DENIED',
-              message: deniedMsg,
+              message: denied.message,
             },
             durationMs: Math.round((Number(process.hrtime.bigint() - t0) / 1e6) * 1000) / 1000,
           });

@@ -749,4 +749,89 @@ describe('M8-lite hardening unit checks', () => {
     expect(rawLogs).toContain('/api/workspaces/[REDACTED]/schema');
     expect(rawLogs).toContain('"wsIdHash"');
   });
+
+  it('emits structured security audit events for denials, 403s, and 429s without leaking raw SQL [LOGGING-003]', async () => {
+    const chunks: string[] = [];
+    const logStream = new PassThrough();
+    logStream.on('data', (chunk: Buffer) => chunks.push(chunk.toString('utf8')));
+
+    const cfg = loadConfig({ ...BASE_ENV, LOG_LEVEL: 'warn' });
+    const ctx = await buildApp({
+      config: cfg,
+      adminPool: makeMockPool(true),
+      enableRateLimit: true,
+      staticDir,
+      logStream,
+    });
+
+    const sqlCanary = 'AUDIT_CANARY_NO_SQL_LEAK';
+    try {
+      // 1. Trigger authz.forbidden via cross-site POST
+      const forbidden = await ctx.app.inject({
+        method: 'POST',
+        url: '/api/workspaces',
+        remoteAddress: '198.51.100.91',
+        headers: {
+          host: 'sql-scratchpad.example',
+          origin: 'https://evil.example',
+          'sec-fetch-site': 'cross-site',
+        },
+        payload: { dataset: 'empty' },
+      });
+      expect(forbidden.statusCode).toBe(403);
+
+      // 2. Trigger playground.denied via ExecEngine with a mock session
+      const now = Date.now();
+      const wsId = 'cccccccccccc';
+      (
+        ctx.workspaceManager as unknown as {
+          workspaces: Map<string, Record<string, unknown>>;
+        }
+      ).workspaces.set(wsId, {
+        wsId,
+        database: 'ws_cccccccccccc',
+        dbUser: 'ws_cccccccccccc',
+        password: 'pw',
+        dataset: 'empty',
+        createdAt: now,
+        lastActiveAt: now,
+        expiresAt: now + 60_000,
+        absoluteExpiresAt: now + 60_000,
+        sessions: {
+          A: {
+            id: 'A',
+            conn: {
+              ping: async () => {},
+              query: async () => [[], []],
+              end: async () => {},
+              destroy: () => {},
+            },
+            threadId: 12,
+            busy: false,
+            lastUsedAt: now,
+          },
+        },
+        sessionLocks: {},
+        sessionWaiters: {},
+        sessionAbort: {},
+        teardownActive: false,
+        deleting: false,
+      });
+
+      const execRes = await ctx.execEngine.execute(wsId, {
+        sql: `SHUTDOWN; -- ${sqlCanary}`,
+        session: 'A',
+        stopOnError: true,
+      });
+      expect(execRes.results[0]?.error?.code).toBe('PLAYGROUND_DENIED');
+    } finally {
+      await ctx.app.close();
+    }
+
+    const logs = chunks.join('');
+    expect(logs).toContain('"event":"authz.forbidden"');
+    expect(logs).toContain('"event":"playground.denied"');
+    expect(logs).toContain('"ruleId":"shutdown"');
+    expect(logs).not.toContain(sqlCanary);
+  });
 });

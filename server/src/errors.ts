@@ -25,6 +25,14 @@ export function fastifyErrorHandler(
   reply: FastifyReply,
 ): void {
   if (err instanceof ApiError) {
+    if (err.statusCode === 403) {
+      req.log.warn({ event: 'authz.forbidden', code: err.code }, 'Forbidden request');
+    } else if (err.statusCode === 429) {
+      req.log.warn(
+        { event: 'rate_limited', code: err.code, retryAfterSec: err.retryAfterSec },
+        'Client rate or quota limit exceeded',
+      );
+    }
     if (err.retryAfterSec !== undefined) {
       void reply.header('Retry-After', String(err.retryAfterSec));
     }
@@ -54,6 +62,7 @@ export function fastifyErrorHandler(
   }
 
   if (fastifyErr.statusCode === 429) {
+    req.log.warn({ event: 'rate_limited', code: 'RATE_LIMITED' }, 'Rate limit exceeded');
     void reply
       .code(429)
       .send(formatApiError('RATE_LIMITED', fastifyErr.message || 'Too many requests'));

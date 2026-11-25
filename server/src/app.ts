@@ -274,8 +274,8 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
   }
 
   const workspaceManager = new WorkspaceManager(adminPool, config, datasets, app.log, ipHasher);
-  const execEngine = new ExecEngine(workspaceManager, config);
-  const importEngine = new ImportEngine(workspaceManager, config);
+  const execEngine = new ExecEngine(workspaceManager, config, app.log, ipHasher);
+  const importEngine = new ImportEngine(workspaceManager, config, app.log, ipHasher);
   const importByteBudget = new ImportByteBudget(config.IMPORT_BYTE_BUDGET_PER_HOUR);
   importByteBudget.startPruner();
 
@@ -385,6 +385,14 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
         ownerIpHash,
         bypassPerIp,
       );
+      req.log.info(
+        {
+          event: 'workspace.create',
+          wsIdHash: ipHasher.tokenHash(created.wsId),
+          dataset: req.body.dataset,
+        },
+        'Workspace created',
+      );
       void reply.code(201);
       return created;
     },
@@ -397,7 +405,16 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
       config: rateLimitEnabled ? { rateLimit: { max: 10, timeWindow: '1 hour' } } : undefined,
     },
     async (req): Promise<ResetWorkspaceResponse> => {
-      return workspaceManager.resetWorkspace(req.params.wsId, req.body.dataset);
+      const res = await workspaceManager.resetWorkspace(req.params.wsId, req.body.dataset);
+      req.log.info(
+        {
+          event: 'workspace.reset',
+          wsIdHash: ipHasher.tokenHash(req.params.wsId),
+          dataset: req.body.dataset,
+        },
+        'Workspace reset',
+      );
+      return res;
     },
   );
 
@@ -502,6 +519,14 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
         }
         const decision = importByteBudget.consume(ipHasher.key(req.ip || 'unknown'), bytes);
         if (!decision.allowed) {
+          req.log.warn(
+            {
+              event: 'import.budget_exceeded',
+              wsIdHash: ipHasher.tokenHash(req.params.wsId),
+              retryAfterSec: decision.retryAfterSec,
+            },
+            'Import byte budget exceeded',
+          );
           void reply.header('Retry-After', String(decision.retryAfterSec));
           const budgetMb = Math.round(config.IMPORT_BYTE_BUDGET_PER_HOUR / (1024 * 1024));
           return reply
@@ -566,6 +591,14 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     async (req): Promise<OkResponse> => {
       const callerIpHash = ipHasher.key(req.ip || 'unknown');
       await workspaceManager.deleteWorkspace(req.params.wsId, undefined, callerIpHash);
+      req.log.info(
+        {
+          event: 'workspace.delete',
+          wsIdHash: ipHasher.tokenHash(req.params.wsId),
+          via: 'beacon',
+        },
+        'Workspace deleted',
+      );
       return { ok: true };
     },
   );
@@ -578,6 +611,14 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
     },
     async (req): Promise<OkResponse> => {
       await workspaceManager.deleteWorkspace(req.params.wsId);
+      req.log.info(
+        {
+          event: 'workspace.delete',
+          wsIdHash: ipHasher.tokenHash(req.params.wsId),
+          via: 'delete',
+        },
+        'Workspace deleted',
+      );
       return { ok: true };
     },
   );

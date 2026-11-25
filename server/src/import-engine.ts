@@ -7,9 +7,15 @@ import type {
   ImportRewrittenStatement,
   ImportSkippedStatement,
 } from '@sql-scratchpad/shared';
+import type { FastifyBaseLogger } from 'fastify';
 import type { AppConfig } from './config.js';
 import { ApiError } from './errors.js';
-import { checkDenylist, splitMariaDbStatements, stripCommentsAndLiterals } from './exec-engine.js';
+import {
+  checkDenylistDetail,
+  splitMariaDbStatements,
+  stripCommentsAndLiterals,
+} from './exec-engine.js';
+import type { IpHasher } from './logger.js';
 import type { WorkspaceManager } from './workspace-manager.js';
 
 const MAX_REPORTED_ITEMS = 100;
@@ -536,6 +542,8 @@ export class ImportEngine {
   constructor(
     private readonly workspaceManager: WorkspaceManager,
     private readonly config: AppConfig,
+    private readonly logger?: FastifyBaseLogger,
+    private readonly ipHasher?: IpHasher,
   ) {}
 
   async importSql(wsId: string, req: ImportRequest): Promise<ImportResponse> {
@@ -684,14 +692,23 @@ export class ImportEngine {
           }
         }
 
-        const deniedMsg = checkDenylist(execSql, ws.database);
-        if (deniedMsg) {
+        const denied = checkDenylistDetail(execSql, ws.database);
+        if (denied) {
+          this.logger?.warn(
+            {
+              event: 'playground.denied',
+              ruleId: denied.ruleId,
+              wsIdHash: this.ipHasher?.tokenHash(ws.wsId),
+              source: 'import',
+            },
+            'Import statement blocked by playground denylist',
+          );
           statementsRun += 1;
           importError = {
             index: i,
             startLine: stmt.startLine,
             code: 'PLAYGROUND_DENIED',
-            message: deniedMsg,
+            message: denied.message,
             alreadyApplied: statementsOk > 0,
           };
           break;

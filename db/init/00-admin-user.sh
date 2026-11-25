@@ -6,8 +6,17 @@ if [ -z "${SQLSCRATCHPAD_ADMIN_PASSWORD:-}" ]; then
   exit 1
 fi
 
-# Escape single quotes for SQL string literal
-ESCAPED_PWD=$(printf '%s' "${SQLSCRATCHPAD_ADMIN_PASSWORD}" | sed "s/'/''/g")
+# Reject CR/LF control characters and escape backslashes before single quotes for SQL string literal
+NL=$(printf '\n_')
+NL=${NL%_}
+CR=$(printf '\r')
+case "${SQLSCRATCHPAD_ADMIN_PASSWORD}" in
+  *"${NL}"*|*"${CR}"*)
+    echo "ERROR: SQLSCRATCHPAD_ADMIN_PASSWORD must not contain newline characters" >&2
+    exit 1
+    ;;
+esac
+ESCAPED_PWD=$(printf '%s' "${SQLSCRATCHPAD_ADMIN_PASSWORD}" | sed "s/\\\\/\\\\\\\\/g; s/'/''/g")
 
 printf "CREATE USER IF NOT EXISTS 'scratchpad_admin'@'%%' IDENTIFIED BY '%s';
 GRANT CREATE USER, CONNECTION ADMIN ON *.* TO 'scratchpad_admin'@'%%';

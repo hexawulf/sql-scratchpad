@@ -50,19 +50,25 @@ export function registerStaticSpa(app: FastifyInstance, distDir: string): boolea
 
   app.setNotFoundHandler(async (req, reply) => {
     const rawPath = req.url.split('?')[0] ?? '/';
-    if (rawPath.startsWith('/api/') || rawPath === '/api') {
-      return reply.code(404).send(formatApiError('NOT_FOUND', 'Route not found'));
-    }
-
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
-      return reply.code(404).send(formatApiError('NOT_FOUND', 'Route not found'));
-    }
 
     let decodedPath: string;
     try {
       decodedPath = decodeURIComponent(rawPath);
     } catch {
       return reply.code(400).send(formatApiError('BAD_REQUEST', 'Malformed URL path'));
+    }
+
+    if (
+      rawPath.startsWith('/api/') ||
+      rawPath === '/api' ||
+      decodedPath.startsWith('/api/') ||
+      decodedPath === '/api'
+    ) {
+      return reply.code(404).send(formatApiError('NOT_FOUND', 'Route not found'));
+    }
+
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      return reply.code(404).send(formatApiError('NOT_FOUND', 'Route not found'));
     }
 
     // Refuse null bytes, backslashes, dotfiles/dot-directories, and traversal segments (404)
@@ -88,7 +94,7 @@ export function registerStaticSpa(app: FastifyInstance, distDir: string): boolea
     if (candidate !== indexHtmlPath && isRegularFile(candidate)) {
       const ext = extname(candidate).toLowerCase();
       const mime = MIME_TYPES[ext] ?? 'application/octet-stream';
-      const isHashedAsset = rawPath.startsWith('/assets/');
+      const isHashedAsset = decodedPath.startsWith('/assets/');
       void reply.header(
         'Cache-Control',
         isHashedAsset ? 'public, max-age=31536000, immutable' : 'no-cache',
@@ -99,7 +105,7 @@ export function registerStaticSpa(app: FastifyInstance, distDir: string): boolea
     }
 
     // If the request explicitly asked for a missing asset file, return 404 instead of index.html
-    if (rawPath.startsWith('/assets/')) {
+    if (decodedPath.startsWith('/assets/')) {
       return reply.code(404).send(formatApiError('NOT_FOUND', 'Asset not found'));
     }
 

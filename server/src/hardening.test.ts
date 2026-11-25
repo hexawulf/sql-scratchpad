@@ -253,7 +253,9 @@ describe('M8-lite hardening unit checks', () => {
 
       for (const req of [
         { method: 'GET' as const, url: '/api/datasets' },
+        { method: 'GET' as const, url: '/%61pi/datasets' },
         { method: 'POST' as const, url: '/api/workspaces', payload: { dataset: 'empty' } },
+        { method: 'POST' as const, url: '/%61pi/workspaces', payload: { dataset: 'empty' } },
         {
           method: 'POST' as const,
           url: '/api/workspaces/abcdefghijkl/exec',

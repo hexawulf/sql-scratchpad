@@ -186,6 +186,18 @@ describe('registerStaticSpa', () => {
       expect(okIndex.statusCode).toBe(200);
       const okAsset = await app.inject({ method: 'GET', url: '/assets/app-abc123.js' });
       expect(okAsset.statusCode).toBe(200);
+
+      // Percent-encoded /api and /assets paths return JSON 404, not SPA index.html [AUTHZ-002]
+      const encodedApi = await app.inject({ method: 'GET', url: '/%61pi/nonexistent' });
+      expect(encodedApi.statusCode).toBe(404);
+      expect(encodedApi.json()).toEqual({
+        error: { code: 'NOT_FOUND', message: 'Route not found' },
+      });
+      const encodedAsset = await app.inject({ method: 'GET', url: '/%61ssets/nope.js' });
+      expect(encodedAsset.statusCode).toBe(404);
+      expect(encodedAsset.json()).toEqual({
+        error: { code: 'NOT_FOUND', message: 'Asset not found' },
+      });
     } finally {
       await app.close();
     }

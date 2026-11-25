@@ -140,8 +140,18 @@ export async function buildApp(options: BuildAppOptions): Promise<AppContext> {
 
   if (config.MAINTENANCE) {
     app.addHook('onRequest', async (req, reply) => {
-      const pathOnly = req.url.split('?')[0] ?? '/';
-      if ((pathOnly === '/api' || pathOnly.startsWith('/api/')) && pathOnly !== '/api/health') {
+      const rawPath = req.url.split('?')[0] ?? '/';
+      let decodedPath: string;
+      try {
+        decodedPath = decodeURIComponent(rawPath);
+      } catch {
+        return reply.code(400).send(formatApiError('BAD_REQUEST', 'Malformed URL path'));
+      }
+      const matchedUrl = req.routeOptions?.url;
+      const isApiPath = (p: string | undefined): boolean =>
+        typeof p === 'string' && (p === '/api' || p.startsWith('/api/')) && p !== '/api/health';
+
+      if (isApiPath(rawPath) || isApiPath(decodedPath) || isApiPath(matchedUrl)) {
         return reply
           .code(503)
           .send(

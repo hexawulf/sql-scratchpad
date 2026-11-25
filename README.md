@@ -42,6 +42,14 @@ Use **Open** to load a `.sql` file into an editor tab, or **Import .sql…** (or
 - **Ephemeral server state:** workspaces exist only while in use and are deleted automatically when idle (2 h idle TTL, 12 h max lifetime in public deployments).
 - **Browser-local state:** editor tabs, query history, and UI preferences stay exclusively in your browser's `localStorage`.
 
+## Security
+
+- **Isolation:** every workspace runs under its own MariaDB user, which has rights only on its own database. The admin account never runs user SQL.
+- **Hard limits:** wall-clock timeouts, statement caps, streamed results with row and byte caps, per-workspace storage caps, per-IP workspace and import budgets, and rate limits on every API route.
+- **Denylist:** `GRANT`, file I/O, `SONAME` plugins, dynamic SQL, advisory locks and global metadata queries are blocked, including inside conditional comments.
+- **Hardened containers:** read-only root-owned app code, dropped capabilities, `no-new-privileges`, `pids_limit`, and digest-pinned base images.
+- **Audited:** the full 2026-11-25 security audit (65 verified findings, all 5 high-severity fixed) is in [docs/security/SECURITY_AUDIT_2026-11-25.md](docs/security/SECURITY_AUDIT_2026-11-25.md). Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
+
 ## Self-Hosting Quick Start
 
 Prerequisites: Docker Engine and Docker Compose v2.
@@ -60,7 +68,7 @@ chmod 600 deploy/db.env deploy/app.env
 docker compose -f deploy/docker-compose.yml pull ; docker compose -f deploy/docker-compose.yml up -d
 ```
 
-SQL Scratchpad listens on `http://127.0.0.1:5050` by default using prebuilt multi-arch (`linux/amd64`, `linux/arm64`) images from Docker Hub (`0xwulf/sql-scratchpad` and `0xwulf/sql-scratchpad-db`). To build from source instead, use `deploy/docker-compose.build.yml`. See [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) for configuration, reverse-proxy setup, and maintenance.
+SQL Scratchpad listens on `http://127.0.0.1:5050` by default using prebuilt multi-arch (`linux/amd64`, `linux/arm64`) images from Docker Hub (`0xwulf/sql-scratchpad` and `0xwulf/sql-scratchpad-db`). Each release `vX.Y.Z` publishes the tags `X.Y.Z`, `X.Y` and `latest` for both images. Pin an exact version (ideally with its `@sha256` digest) in production. To build from source instead, use `deploy/docker-compose.build.yml`. See [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) for configuration, reverse-proxy setup, and maintenance.
 
 ## Documentation
 

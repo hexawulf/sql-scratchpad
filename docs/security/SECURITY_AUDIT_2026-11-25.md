@@ -1622,3 +1622,16 @@ The following architectural improvements are out of scope for a single non-break
 | Typecheck | `pnpm typecheck` | **PASS** | Exit 0 across all 3 workspace packages |
 | Unit & Web tests | `pnpm exec vitest run --project unit --project web` | **PASS** | **6 files passed, 62 tests passed, 0 failed** (`vitest v5.1.1`: `exec-engine.test.ts` 18, `static.test.ts` 6, `hardening.test.ts` 10, `utils.test.ts` 10, `mariadb.test.ts` 4, `components.test.ts` 14) |
 | Integration / Seeds / E2E | `pnpm test:int`, `pnpm seeds:verify`, `pnpm test:e2e` | **NOT RUN** | Requires live MariaDB 11.4 instance (unavailable in static audit environment) |
+
+## Appendix C — Post-audit review fixes (before merge)
+
+The audit did not run the MariaDB integration suite. CI on the pull request did run it, and it failed. Review against a live MariaDB 11.4 found two problems, fixed before merge:
+
+| Commit | Problem | Fix |
+|---|---|---|
+| `7b4bc59` | The raw mysql2 streaming paths added for API-002 (exec) and import never saw fatal socket errors: mysql2 sends them to the connection emitter. A statement over `max_allowed_packet` (or any dropped connection) left the request pending forever, and it held its `/import` concurrency slot, so later imports returned 429. | `onRawConnectionFailure()` fails the pending statement on connection `error` / `end` in both paths. |
+| `be46fd7` | The janitor integration test used `MAX_WORKSPACE_BYTES=1` for the whole app. After LOGIC-003, `/exec` refuses to run on an over-cap workspace, so the test's busy `SLEEP(4)` never started. | The test lowers the cap only for the sweep. |
+
+After both fixes: integration 23/23 and `seeds:verify` against MariaDB 11.4 on arm64, and all CI jobs green (lint, build, unit, integration, E2E, security scans).
+
+Follow-up (not fixed): AUTHZ-005 removes `TRIGGER` on `tpl_*` from the init script, but `WorkspaceManager` clones template triggers through `information_schema.TRIGGERS`, which needs that privilege. No template has triggers today. A future template with triggers would clone without them and without an error. CI still grants `TRIGGER` on `tpl_*`, so tests would not catch it.

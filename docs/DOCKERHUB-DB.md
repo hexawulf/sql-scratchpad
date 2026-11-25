@@ -6,7 +6,12 @@ Database companion image for **[SQL Scratchpad](https://sql-scratchpad.com)** â€
 
 - **MariaDB 11.4 LTS** multi-arch base (`linux/amd64`, `linux/arm64`).
 - Hardened server configuration (`/etc/mysql/conf.d/sql-scratchpad.cnf`) tuned for ephemeral, least-privilege workspace databases (`ws_*`) with conservative memory limits and `local_infile` / file-I/O disabled.
-- Init scripts that provision the least-privilege `scratchpad_admin` account and load the built-in `sample-library` template database (`tpl_sample_library`).
+- Init scripts that provision the least-privilege `scratchpad_admin` account and load the built-in `sample-library` template database (`tpl_sample_library`). On a fresh volume they drop the remote `root@'%'` account, give template schemas read-only grants, and pass credentials through `MYSQL_PWD` and stdin. They refuse placeholder passwords.
+- Built-in `HEALTHCHECK` (`healthcheck.sh --connect --innodb_initialized`), `skip-symbolic-links`, and a read-only `secure_file_priv` directory.
+
+## Tags
+
+Each SQL Scratchpad release `vX.Y.Z` publishes `X.Y.Z`, `X.Y` and `latest` for `linux/amd64` and `linux/arm64`, with SBOM and provenance attestations. Use the same version as the app image, and pin the `@sha256` digest in production. Current release: **0.3.8** (security release, see the [changelog](https://github.com/hexawulf/sql-scratchpad/blob/main/CHANGELOG.md)).
 
 ## Usage
 

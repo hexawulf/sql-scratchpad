@@ -4,6 +4,26 @@ All notable changes to SQL Scratchpad are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-11-26
+
+Security release from the 2026-11-25 security swarm audit: 65 verified findings (0 critical, 5 high, 10 medium, 37 low, 13 info), 45 fixed in one atomic commit each. The full report is [docs/security/SECURITY_AUDIT_2026-11-25.md](docs/security/SECURITY_AUDIT_2026-11-25.md).
+
+### Security
+
+- **Query execution limits (high):** `/exec` enforces a wall-clock timeout (`EXEC_TIMEOUT_MS`) and a statement cap. Result rows stream from MariaDB and stop at `ROW_CAP` / `RESPONSE_CAP_BYTES` mid-stream, with `SESSION sql_select_limit` as a second guard. The janitor tears down workspaces past their absolute lifetime even when a session is busy.
+- **ReDoS (high):** the dump-header, conditional-comment, `SONAME` and `DELIMITER` parsers scan linearly instead of using quadratic or cubic regexes. Custom delimiters are capped at 16 characters.
+- **SQL denylist:** closes bypasses through backticks, `/*M!…*/` comments, dynamic SQL, `NO_BACKSLASH_ESCAPES`, advisory locks, global metadata queries and `DATA/INDEX DIRECTORY`.
+- **Resource limits:** per-workspace storage cap on `/exec` and `/import` (`507 WORKSPACE_STORAGE_LIMIT`), synchronous capacity reservation before provisioning, bounded `/import` concurrency, bounded admin pool queue, single-flight `/schema`, pruned import byte budgets, and HTTP timeouts.
+- **Web:** cross-site state-changing requests get `403 CROSS_SITE_FORBIDDEN` before rate limiting. A stricter CSP and security headers apply to every response, including API errors. `/api/health` and `/api/datasets` are rate-limited. TSV/Markdown/HTML exports neutralise formula prefixes and escape cells.
+- **Logging:** privacy-safe audit events for denials, 403s, 429s and workspace lifecycle. Workspace ids and query strings are redacted, and mysql2 error fields are scrubbed.
+- **Configuration:** the app refuses to start with a placeholder admin password or with `LOADTEST_ALLOW_IPS` in production.
+- **Containers:** app code and assets are root-owned and read-only, `/tmp` is `noexec,nosuid,nodev`, and both services get `pids_limit`. The db image adds a `HEALTHCHECK`, `skip-symbolic-links` and a read-only `mysql-files-disabled`. On fresh volumes the init scripts drop remote `root@'%'`, remove `TRIGGER` on template schemas, and pass credentials through `MYSQL_PWD` and stdin.
+- **Supply chain / CI:** digest-pinned Node base images that Dependabot tracks, pnpm pinned by SHA-512, `--ignore-scripts` installs, a new CI security job (`pnpm audit`, Trivy, hadolint, actionlint), job timeouts, and `release.yml` checks out the tagged SHA and verifies that it is on `main`.
+
+### Fixed
+
+- **Hung streaming statements:** a statement whose connection died mid-query (for example an import statement larger than `max_allowed_packet`) never finished, kept its `/import` slot and made later imports return 429. The streaming paths now fail the statement on a connection error or close.
+
 ### Added
 
 - **Search crawler files and homepage metadata:** `web/public/robots.txt` allows crawling and points at `https://sql-scratchpad.com/sitemap.xml`. `web/public/sitemap.xml` lists `https://sql-scratchpad.com/`. The static server serves them as `text/plain` and `application/xml` instead of the SPA `index.html`. The homepage adds a canonical URL and a meta description.

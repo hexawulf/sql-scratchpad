@@ -79,7 +79,7 @@ docker compose -f deploy/docker-compose.build.yml up -d --build
 | `DB_PORT` | `3306` | MariaDB service port. |
 | `HOST` | `0.0.0.0` | Listen address inside the app container. |
 | `PORT` | `5050` | Listen port inside the app container. |
-| `TRUST_PROXY` | *(empty)* | Comma-separated IP/CIDR list of trusted reverse proxies (e.g. `127.0.0.1`). Forwarded headers are ignored completely when empty. |
+| `TRUST_PROXY` | *(empty)* | Comma-separated IP/CIDR list of trusted reverse proxies that send `X-Forwarded-For` (Fastify ignores `X-Real-IP`). When running `app` in Docker behind a host reverse proxy, use the Docker `edge` network gateway IP/CIDR (see below), not `127.0.0.1`. Forwarded headers are ignored completely when empty. |
 | `LOG_LEVEL` | `info` | Pino log level (`fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`). Client IPs are logged only as daily-salted SHA-256 hashes. |
 | `WORKSPACE_TTL_MS` | `7200000` | Idle workspace TTL in ms (default **2 hours**). |
 | `WORKSPACE_MAX_TTL_MS` | `43200000` | Absolute maximum workspace lifetime in ms (default **12 hours**). |
@@ -98,10 +98,72 @@ docker compose -f deploy/docker-compose.build.yml up -d --build
 
 By default, `deploy/docker-compose.yml` binds `127.0.0.1:5050`. When exposing SQL Scratchpad over HTTPS behind nginx or Caddy:
 
-- Allow bodies up to **7 MB** (`client_max_body_size 7m;` in nginx) so 6 MB `.sql` imports succeed.
-- Set proxy read timeout to at least **120 s** (`proxy_read_timeout 120s;`) for large imports and lock-wait queries.
-- Forward the real client IP (`X-Forwarded-For` / `X-Real-IP`) and set `TRUST_PROXY` in `deploy/app.env` to your proxy's IP.
-- Do not duplicate security headers (`Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy`); the app container sets them directly.
+- **Terminate TLS 1.2+/1.3** at the reverse proxy, redirect HTTP (`:80`) to HTTPS (`:443`), and send `Strict-Transport-Security: max-age=31536000; includeSubDomains`.
+- **Allow bodies up to 7 MB** (`client_max_body_size 7m;` in nginx) so 6 MB `.sql` imports succeed.
+- **Set proxy read timeout to at least 120 s** (`proxy_read_timeout 120s;`) for large imports and lock-wait queries.
+- **Forward `X-Forwarded-For` (not `X-Real-IP` alone):** Fastify reads `X-Forwarded-For` and ignores `X-Real-IP`. On a single-hop proxy, overwrite the header with `$remote_addr` so clients cannot spoof earlier hops; behind a CDN/edge proxy, use `set_real_ip_from` + `real_ip_header` on nginx before forwarding.
+- **Set `TRUST_PROXY` to the Docker `edge` gateway IP/CIDR, not `127.0.0.1`:** Because the `app` container receives host-proxied traffic over the Docker bridge network, its peer address is the `edge` bridge gateway (for example `172.18.0.1` or its `/16` subnet), not `127.0.0.1`. Inspect it with:
+
+  ```bash
+  docker network inspect sql-scratchpad_edge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'
+  ```
+
+  Then set `TRUST_PROXY=<gateway-ip>` (for example `TRUST_PROXY=172.18.0.1`) in `deploy/app.env`.
+- **Do not duplicate app security headers:** The app container emits `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, and `Cross-Origin-Resource-Policy` on both static and `/api/*` responses.
+
+### Example: nginx
+
+```nginx
+server {
+  listen 80;
+  listen [::]:80;
+  server_name sql-scratchpad.example.com;
+  return 301 https://$host$request_uri;
+}
+
+server {
+  listen 443 ssl http2;
+  listen [::]:443 ssl http2;
+  server_name sql-scratchpad.example.com;
+
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_certificate     /etc/ssl/certs/sql-scratchpad.pem;
+  ssl_certificate_key /etc/ssl/private/sql-scratchpad.key;
+
+  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+  client_max_body_size 7m;
+
+  location / {
+    proxy_pass http://127.0.0.1:5050;
+    proxy_http_version 1.1;
+    proxy_read_timeout 120s;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    # Single-hop proxy: overwrite X-Forwarded-For so clients cannot prepend spoofed IPs.
+    # If behind a CDN, configure set_real_ip_from/real_ip_header and use $proxy_add_x_forwarded_for.
+    proxy_set_header X-Forwarded-For $remote_addr;
+  }
+}
+```
+
+### Example: Caddy
+
+```caddyfile
+sql-scratchpad.example.com {
+  header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+  request_body {
+    max_size 7MB
+  }
+  reverse_proxy 127.0.0.1:5050 {
+    transport http {
+      response_header_timeout 120s
+    }
+    header_up X-Forwarded-For {remote_host}
+    header_up X-Forwarded-Proto https
+  }
+}
+```
 
 ## Updating and Resetting
 

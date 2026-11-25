@@ -13,7 +13,7 @@ COPY shared/package.json ./shared/package.json
 COPY server/package.json ./server/package.json
 COPY web/package.json ./web/package.json
 
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 COPY shared ./shared
 COPY server ./server

@@ -4,7 +4,7 @@ packages:
   - web
 
 allowBuilds:
-  esbuild: true
+  esbuild: false
 
 # Dependabot alerts (dev-only chain: @vue/test-utils -> js-beautify 2.0.3).
 # js-beautify still pins glob ^13 and editorconfig ^3 (minimatch ~10).

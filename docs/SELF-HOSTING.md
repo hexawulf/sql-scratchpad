@@ -2,8 +2,8 @@
 
 SQL Scratchpad runs as two prebuilt multi-arch (`linux/amd64`, `linux/arm64`) Docker images published on Docker Hub — no local Node.js or build toolchain is required:
 
-- **`0xwulf/sql-scratchpad-db:0.3.8`** — MariaDB 11.4 LTS with conservative memory settings and the `sample-library` template database.
-- **`0xwulf/sql-scratchpad:0.3.8`** — Node 24 Fastify API + prebuilt Vue 3 static SPA.
+- **`0xwulf/sql-scratchpad-db:0.3.9`** — MariaDB 11.4 LTS with conservative memory settings and the `sample-library` template database.
+- **`0xwulf/sql-scratchpad:0.3.9`** — Node 24 Fastify API + prebuilt Vue 3 static SPA.
 
 ## Resource Requirements
 
@@ -48,7 +48,7 @@ SQL Scratchpad runs as two prebuilt multi-arch (`linux/amd64`, `linux/arm64`) Do
 
    ```bash
    curl -s http://127.0.0.1:5050/api/health
-   # Expected: {"status":"ok","db":"ok","version":"0.3.8"}
+   # Expected: {"status":"ok","db":"ok","version":"0.3.9"}
    ```
 
    Open `http://127.0.0.1:5050` in your browser.

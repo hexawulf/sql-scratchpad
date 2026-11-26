@@ -11,7 +11,7 @@ Database companion image for **[SQL Scratchpad](https://sql-scratchpad.com)** â€
 
 ## Tags
 
-Each SQL Scratchpad release `vX.Y.Z` publishes `X.Y.Z`, `X.Y` and `latest` for `linux/amd64` and `linux/arm64`, with SBOM and provenance attestations. Use the same version as the app image, and pin the `@sha256` digest in production. Current release: **0.3.8** (security release, see the [changelog](https://github.com/hexawulf/sql-scratchpad/blob/main/CHANGELOG.md)).
+Each SQL Scratchpad release `vX.Y.Z` publishes `X.Y.Z`, `X.Y` and `latest` for `linux/amd64` and `linux/arm64`, with SBOM and provenance attestations. Use the same version as the app image, and pin the `@sha256` digest in production. Current release: **0.3.9** (see the [changelog](https://github.com/hexawulf/sql-scratchpad/blob/main/CHANGELOG.md)).
 
 ## Usage
 

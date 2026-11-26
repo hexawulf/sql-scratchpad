@@ -4,6 +4,20 @@ All notable changes to SQL Scratchpad are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-11-26
+
+Hardening follow-ups to the 0.3.8 security release (#17).
+
+### Security
+
+- **Release pipeline:** images publish from a protected `release` environment that only `v*.*.*` tags can deploy to, and `v*` tags are protected by a ruleset. The third-party Docker Hub description action runs in its own job, away from the image push credentials. Every action must be SHA-pinned.
+- **DB image:** the seed init script refuses a template that defines triggers. `scratchpad_admin` can no longer see template triggers, so clones would otherwise silently lack them. CI now uses the same grants as `db/init`.
+- **Repository:** CODEOWNERS, required CI checks and code-owner review on `main`, Dependabot security updates, and private vulnerability reporting.
+
+### Docs
+
+- `deploy/docker-compose.yml` pins images by `tag@sha256` digest. SELF-HOSTING explains digest bumps and gives a one-time snippet that applies the 0.3.8 init hardening to an existing volume. SECURITY.md points reporters at private vulnerability reporting.
+
 ## [0.3.8] - 2026-11-26
 
 Security release from the 2026-11-25 security swarm audit: 65 verified findings (0 critical, 5 high, 10 medium, 37 low, 13 info), 45 fixed in one atomic commit each. The full report is [docs/security/SECURITY_AUDIT_2026-11-25.md](docs/security/SECURITY_AUDIT_2026-11-25.md).

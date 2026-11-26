@@ -2,7 +2,7 @@ name: sql-scratchpad
 
 services:
   db:
-    image: 0xwulf/sql-scratchpad-db:0.3.8@sha256:f39abf03dc47ab122bb73aea3b6e2ce3baf1952b6f7b7f42852019bf6e6b04b9
+    image: 0xwulf/sql-scratchpad-db:0.3.9@sha256:199a80a569bf602ffdc906366f7e65fc4aff9f65804891242d57a5fdfd6fd8ad
     restart: unless-stopped
     env_file:
       - db.env
@@ -39,7 +39,7 @@ services:
       start_period: 45s
 
   app:
-    image: 0xwulf/sql-scratchpad:0.3.8@sha256:6ee39a655cb73e1da8e47d27b96e4833ae155c648115779b101bdeae5919d503
+    image: 0xwulf/sql-scratchpad:0.3.9@sha256:83e5510d8fe312fa7d3e8765b0e76d48a6699b030b5bca6f0e5c7a5bcba0492d
     restart: unless-stopped
     env_file:
       - app.env

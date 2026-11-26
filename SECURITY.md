@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security issue in SQL Scratchpad, please email **dev@0xwulf.dev** with reproduction steps and impact details instead of opening a public issue. We will acknowledge reports promptly and coordinate a fix before disclosure.
+If you discover a security issue in SQL Scratchpad, please report it privately through [GitHub private vulnerability reporting](https://github.com/hexawulf/sql-scratchpad/security/advisories/new) or email **dev@0xwulf.dev** with reproduction steps and impact details. Do not open a public issue. We will acknowledge reports promptly and coordinate a fix before disclosure.
 
 ---
 

@@ -167,7 +167,7 @@ sql-scratchpad.example.com {
 
 ## Updating and Resetting
 
-- **Release upgrade (prebuilt images):** bump the pinned version tags in `deploy/docker-compose.yml` (or `git pull` a new release tag), then pull and recreate:
+- **Release upgrade (prebuilt images):** bump the pinned `version@sha256:digest` references in `deploy/docker-compose.yml` (or `git pull` a new release tag), then pull and recreate. Each GitHub release lists both digests. Pull and recreate with:
 
   ```bash
   docker compose -f deploy/docker-compose.yml pull ; docker compose -f deploy/docker-compose.yml up -d
@@ -188,6 +188,17 @@ sql-scratchpad.example.com {
   ```
 
   Workspaces are ephemeral by design, so no database backup is needed.
+
+- **Upgrading an existing volume to 0.3.8 without a reset:** the 0.3.8 init scripts drop the remote `root@'%'` account and remove `TRIGGER` on template schemas, but init scripts only run on an empty volume. To apply both to a volume created before 0.3.8, run once:
+
+  ```bash
+  docker compose -f deploy/docker-compose.yml exec -T db \
+    sh -c 'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb -u root' <<'SQL'
+  DROP USER IF EXISTS 'root'@'%';
+  REVOKE TRIGGER ON `tpl\_%`.* FROM 'scratchpad_admin'@'%';
+  FLUSH PRIVILEGES;
+  SQL
+  ```
 
 ## Maintenance Kill Switch
 

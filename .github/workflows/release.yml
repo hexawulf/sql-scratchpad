@@ -25,6 +25,9 @@ jobs:
     needs: [ci]
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # Docker Hub credentials live in the protected `release` environment, which only
+    # v*.*.* tags can deploy to (CICD-001 / CICD-002).
+    environment: release
 
     steps:
       - name: Checkout tagged commit
@@ -144,6 +147,23 @@ jobs:
           sbom: true
           cache-from: type=gha,scope=db
           cache-to: type=gha,mode=max,scope=db
+
+  # Third-party description sync runs in its own job, after the images are pushed, so it
+  # never shares a runner with the buildx push credentials (CICD-002).
+  hub-description:
+    name: Sync Docker Hub descriptions
+    if: github.repository == 'hexawulf/sql-scratchpad'
+    needs: [publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
       - name: Sync Docker Hub description (app)
         uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0

@@ -78,7 +78,7 @@ jobs:
             CREATE USER IF NOT EXISTS 'scratchpad_admin'@'%' IDENTIFIED BY 'ci-admin-password';
             GRANT CREATE USER, CONNECTION ADMIN ON *.* TO 'scratchpad_admin'@'%';
             GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, INDEX, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, CREATE TEMPORARY TABLES, LOCK TABLES, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON \`ws\\_%\`.* TO 'scratchpad_admin'@'%' WITH GRANT OPTION;
-            GRANT SELECT, SHOW VIEW, TRIGGER ON \`tpl\\_%\`.* TO 'scratchpad_admin'@'%';
+            GRANT SELECT, SHOW VIEW ON \`tpl\\_%\`.* TO 'scratchpad_admin'@'%';
             GRANT SELECT (User, Host) ON mysql.user TO 'scratchpad_admin'@'%';
             FLUSH PRIVILEGES;
             CREATE DATABASE IF NOT EXISTS tpl_sample_library CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -153,7 +153,7 @@ jobs:
             CREATE USER IF NOT EXISTS 'scratchpad_admin'@'%' IDENTIFIED BY 'ci-admin-password';
             GRANT CREATE USER, CONNECTION ADMIN ON *.* TO 'scratchpad_admin'@'%';
             GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, INDEX, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER, CREATE TEMPORARY TABLES, LOCK TABLES, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON \`ws\\_%\`.* TO 'scratchpad_admin'@'%' WITH GRANT OPTION;
-            GRANT SELECT, SHOW VIEW, TRIGGER ON \`tpl\\_%\`.* TO 'scratchpad_admin'@'%';
+            GRANT SELECT, SHOW VIEW ON \`tpl\\_%\`.* TO 'scratchpad_admin'@'%';
             GRANT SELECT (User, Host) ON mysql.user TO 'scratchpad_admin'@'%';
             FLUSH PRIVILEGES;
             CREATE DATABASE IF NOT EXISTS tpl_sample_library CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
